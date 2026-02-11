@@ -168,7 +168,8 @@ DV_UVMT_SRCS                  = $(wildcard $(DV_UVMT_PATH)/*.sv))
 
 # Testcase name: must be the CLASS name of the testcase (not the filename).
 # Look in ../../tests/uvmt
-UVM_TESTNAME ?= uvmt_$(CV_CORE_LC)_firmware_test_c
+UVM_TEST_NAME ?= uvmt_$(CV_CORE_LC)_general_purpose_test_c
+TEST_UVM_TEST ?= $(UVM_TEST_NAME)
 
 # Google's random instruction generator
 RISCVDV_PKG         := $(CORE_V_VERIF)/$(CV_CORE_LC)/vendor_lib/google/riscv-dv

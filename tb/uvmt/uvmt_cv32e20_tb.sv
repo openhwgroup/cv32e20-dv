@@ -1,4 +1,5 @@
 //
+// Copyright (c) 2025 Eclipse Foundation
 // Copyright 2020,2022 OpenHW Group
 // Copyright 2020 Datum Technology Corporation
 // Copyright 2020 Silicon Labs, Inc.
@@ -272,7 +273,7 @@ module uvmt_cv32e20_tb;
   //        endcase
   //    end
   //  end
-  // // End of ISS WRAPPER instanitation and step-and-compare logic.
+  // // End of ISS WRAPPER instantiation and step-and-compare logic.
   /////////////////////////////////////////////////////////////////////////////
 
    // Informational print message on loading of OVPSIM ISS to benchmark some elf image loading times

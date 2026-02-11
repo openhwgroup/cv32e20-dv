@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 // 
+// Copyright (c) 2025 Eclipse Foundation
 // Copyright 2022 OpenHW Group
 // Copyright 2020 Datum Technology Corporation
 // 
@@ -30,9 +31,9 @@ class uvme_cv32e20_cov_model_c extends uvm_component;
    uvme_cv32e20_cfg_c    cfg;
    uvme_cv32e20_cntxt_c  cntxt;
 
-   uvme_rv32isa_covg   isa_covg;   
-   uvme_interrupt_covg interrupt_covg;
-   uvme_debug_covg debug_covg;
+   uvme_rv32isa_covg     isa_covg;
+   uvme_interrupt_covg   interrupt_covg;
+   uvme_debug_covg       debug_covg;
 
    `uvm_component_utils_begin(uvme_cv32e20_cov_model_c)
       `uvm_field_object(cfg  , UVM_DEFAULT)

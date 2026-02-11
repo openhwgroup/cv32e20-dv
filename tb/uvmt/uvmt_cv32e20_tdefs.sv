@@ -27,6 +27,7 @@ typedef enum {
               PREEXISTING_NOTSELFCHECKING,
               GENERATED_SELFCHECKING,
               GENERATED_NOTSELFCHECKING,
+	      GENERAL_PURPOSE,
               NO_TEST_PROGRAM
              } test_program_type;
 

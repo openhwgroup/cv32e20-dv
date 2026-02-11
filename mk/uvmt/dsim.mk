@@ -211,7 +211,7 @@ test: $(DSIM_SIM_PREREQ) hex gen_ovpsim_ic
 			-sv_lib $(abspath $(SVLIB_LIB)) \
 			-sv_lib $(OVP_MODEL_DPI) \
 			-sv_lib $(RVVI_STUB_LIB) \
-			+UVM_TESTNAME=$(TEST_UVM_TEST) \
+			+UVM_TESTNAME=$(UVM_TEST_NAME) \
 			+firmware=$(SIM_TEST_PROGRAM_RESULTS)/$(TEST_PROGRAM)$(OPT_RUN_INDEX_SUFFIX).hex \
 			+elf_file=$(SIM_TEST_PROGRAM_RESULTS)/$(TEST_PROGRAM)$(OPT_RUN_INDEX_SUFFIX).elf \
 			+itb_file=$(SIM_TEST_PROGRAM_RESULTS)/$(TEST_PROGRAM)$(OPT_RUN_INDEX_SUFFIX).itb

@@ -19,27 +19,27 @@
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
 
-`ifndef __UVMT_CV32E20_FIRMWARE_TEST_SV__
-`define __UVMT_CV32E20_FIRMWARE_TEST_SV__
+`ifndef __UVMT_CV32E20_GENERAL_PURPOSE_TEST_SV__
+`define __UVMT_CV32E20_GENERAL_PURPOSE_TEST_SV__
 
 
 /**
- *  CV32E20 "firmware" test.
+ *  CV32E20 "general purpose firmware" test.
  *  This class relies on a pre-existing "firmware" file written in C and/or RISC-V assembly code.
- *
+ *  The "firmware" can be either manually written or machine generated.
  */
-class uvmt_cv32e20_firmware_test_c extends uvmt_cv32e20_base_test_c;
+class uvmt_cv32e20_general_purpose_test_c extends uvmt_cv32e20_base_test_c;
 
    constraint test_type_cons {
-     test_cfg.tpt == PREEXISTING_SELFCHECKING;
+     test_cfg.tpt == GENERAL_PURPOSE;
    }
 
-   `uvm_component_utils_begin(uvmt_cv32e20_firmware_test_c)
+   `uvm_component_utils_begin(uvmt_cv32e20_general_purpose_test_c)
    `uvm_object_utils_end
 
    /**
     */
-   extern function new(string name="uvmt_cv32e20_firmware_test", uvm_component parent=null);
+   extern function new(string name="uvmt_cv32e20_general_purpose_test", uvm_component parent=null);
 
 
    /*
@@ -70,20 +70,25 @@ class uvmt_cv32e20_firmware_test_c extends uvmt_cv32e20_base_test_c;
     */
    extern virtual task random_fetch_toggle();
 
-endclass : uvmt_cv32e20_firmware_test_c
+endclass : uvmt_cv32e20_general_purpose_test_c
 
 
-function uvmt_cv32e20_firmware_test_c::new(string name="uvmt_cv32e20_firmware_test", uvm_component parent=null);
+function uvmt_cv32e20_general_purpose_test_c::new(string name="uvmt_cv32e20_general_purpose_test", uvm_component parent=null);
 
    super.new(name, parent);
-   `uvm_info("TEST", "This is the FIRMWARE TEST", UVM_NONE)
+   `uvm_info("TEST", "This is the GENERAL PURPOSE FIRMWARE UVM_TEST", UVM_NONE)
 
 endfunction : new
 
-task uvmt_cv32e20_firmware_test_c::run_phase(uvm_phase phase);
+task uvmt_cv32e20_general_purpose_test_c::run_phase(uvm_phase phase);
 
    // start_clk() and watchdog_timer() are called in the base_test
    super.run_phase(phase);
+
+   // The RVFI Agent needs to be writting to it AP, otherwise the reference
+   // model and ISA functional coverage model have nothing to proces.
+   env.rvfi_agent.instr_monitor.cfg.ap_write_en = 1;
+   `uvm_info("TEST", "Writing to RVFI Agent's instruction monitor Analysis Port enabled", UVM_NONE)
 
    if ($test$plusargs("gen_random_debug")) begin
     fork
@@ -137,7 +142,7 @@ task uvmt_cv32e20_firmware_test_c::run_phase(uvm_phase phase);
 
 endtask : run_phase
 
-task uvmt_cv32e20_firmware_test_c::reset_debug();
+task uvmt_cv32e20_general_purpose_test_c::reset_debug();
     uvme_cv32e20_random_debug_reset_c debug_vseq;
     debug_vseq = uvme_cv32e20_random_debug_reset_c::type_id::create("random_debug_reset_vseqr", vsequencer);
     `uvm_info("TEST", "Applying debug_req_i at reset", UVM_NONE);
@@ -150,15 +155,15 @@ task uvmt_cv32e20_firmware_test_c::reset_debug();
 
 endtask
 
-function void uvmt_cv32e20_firmware_test_c::build_phase(uvm_phase phase);
+function void uvmt_cv32e20_general_purpose_test_c::build_phase(uvm_phase phase);
        super.build_phase(phase);
 
-       `uvm_info("firmware_test", "Overriding Reference Model with Spike", UVM_NONE)
+       `uvm_info("TEST", "Overriding Reference Model with Spike", UVM_NONE)
        set_type_override_by_type(uvmc_rvfi_reference_model#()::get_type(),uvmc_rvfi_spike#()::get_type());
 
 endfunction : build_phase
 
-task uvmt_cv32e20_firmware_test_c::bootset_debug();
+task uvmt_cv32e20_general_purpose_test_c::bootset_debug();
     uvme_cv32e20_random_debug_bootset_c debug_vseq;
     debug_vseq = uvme_cv32e20_random_debug_bootset_c::type_id::create("random_debug_bootset_vseqr", vsequencer);
     `uvm_info("TEST", "Applying single cycle debug_req after reset", UVM_NONE);
@@ -177,7 +182,7 @@ task uvmt_cv32e20_firmware_test_c::bootset_debug();
 
 endtask
 
-task uvmt_cv32e20_firmware_test_c::random_debug();
+task uvmt_cv32e20_general_purpose_test_c::random_debug();
     `uvm_info("TEST", "Starting random debug in thread UVM test", UVM_NONE)
 
     while (1) begin
@@ -192,7 +197,7 @@ task uvmt_cv32e20_firmware_test_c::random_debug();
     end
 endtask : random_debug
 
-task uvmt_cv32e20_firmware_test_c::irq_noise();
+task uvmt_cv32e20_general_purpose_test_c::irq_noise();
   `uvm_info("TEST", "Starting IRQ Noise thread in UVM test", UVM_NONE);
   while (1) begin
     uvme_cv32e20_interrupt_noise_c interrupt_noise_vseq;
@@ -206,7 +211,7 @@ task uvmt_cv32e20_firmware_test_c::irq_noise();
   end
 endtask : irq_noise
 
-task uvmt_cv32e20_firmware_test_c::random_fetch_toggle();
+task uvmt_cv32e20_general_purpose_test_c::random_fetch_toggle();
   `uvm_info("TEST", "Starting random_fetch_toggle thread in UVM test", UVM_NONE);
   while (1) begin
     int unsigned fetch_assert_cycles;
@@ -236,4 +241,4 @@ task uvmt_cv32e20_firmware_test_c::random_fetch_toggle();
 
 endtask : random_fetch_toggle
 
-`endif // __UVMT_CV32E20_FIRMWARE_TEST_SV__
+`endif // __UVMT_CV32E20_GENERAL_PURPOSE_TEST_SV__

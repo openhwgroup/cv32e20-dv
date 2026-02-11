@@ -58,7 +58,7 @@ package uvmt_cv32e20_pkg;
    //`include "uvmt_cv32e20_smoke_test.sv" // smoke test has multile XMRs that are illegal according to the LRM
 
    // Compilance tests
-   `include "uvmt_cv32e20_firmware_test.sv"
+   `include "uvmt_cv32e20_general_purpose_test.sv"
 
 endpackage : uvmt_cv32e20_pkg
 

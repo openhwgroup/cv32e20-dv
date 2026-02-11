@@ -47,6 +47,7 @@ package uvme_cv32e20_pkg;
    import uvml_mem_pkg       ::*;
 
    import uvma_core_cntrl_pkg::*;
+   import uvma_isacov_pkg::*;
    import uvma_rvfi_pkg::*;
    import uvmc_rvfi_scoreboard_pkg::*;
    import uvmc_rvfi_reference_model_pkg::*;

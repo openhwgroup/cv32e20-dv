@@ -30,6 +30,7 @@
 -f ${DV_UVMA_DEBUG_PATH}/uvma_debug_pkg.flist
 -f ${DV_UVMA_CORE_CNTRL_PATH}/uvma_core_cntrl_pkg.flist
 -f ${DV_UVMA_RVFI_PATH}/uvma_rvfi_pkg.flist
+-f ${DV_UVMA_ISACOV_PATH}/uvma_isacov_pkg.flist
 -f ${DV_UVMC_RVFI_REFERENCE_MODEL_PATH}/uvmc_rvfi_reference_model_pkg.flist
 -f ${DV_UVMC_RVFI_SCOREBOARD_PATH}/uvmc_rvfi_scoreboard_pkg.flist
 
@@ -43,7 +44,7 @@
 +incdir+${DV_UVMT_PATH}
 +incdir+${DV_UVMT_PATH}/../../tests/uvmt
 +incdir+${DV_UVMT_PATH}/../../tests/uvmt/base-tests
-+incdir+${DV_UVMT_PATH}/../../tests/uvmt/compliance-tests
++incdir+${DV_UVMT_PATH}/../../tests/uvmt/firmware-tests
 +incdir+${DV_UVMT_PATH}/../../tests/uvmt/vseq
 
 // CV32E20 tests (includes constants/macros/types meant for test bench)

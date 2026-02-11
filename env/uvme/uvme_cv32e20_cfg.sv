@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+//
+// Copyright (c) 2025 Eclipse Foundation
 // Copyright 2020,2022 OpenHW Group
 // Copyright 2020 Datum Technology Corporation
 // Copyright 2020 Silicon Labs, Inc.
@@ -34,6 +36,7 @@ class uvme_cv32e20_cfg_c extends uvma_core_cntrl_cfg_c;
    rand longint unsigned fetch_initial_delay;
 
    // Agent cfg handles
+   rand uvma_isacov_cfg_c     isacov_cfg;
    rand uvma_clknrst_cfg_c    clknrst_cfg;
    rand uvma_interrupt_cfg_c  interrupt_cfg;
    rand uvma_debug_cfg_c      debug_cfg;
@@ -65,6 +68,7 @@ class uvme_cv32e20_cfg_c extends uvma_core_cntrl_cfg_c;
       `uvm_field_int (                         sys_clk_period            , UVM_DEFAULT + UVM_DEC)
       //`uvm_field_int (                         debug_clk_period            , UVM_DEFAULT + UVM_DEC)
 
+      `uvm_field_object(isacov_cfg          , UVM_DEFAULT)
       `uvm_field_object(clknrst_cfg         , UVM_DEFAULT)
       `uvm_field_object(interrupt_cfg       , UVM_DEFAULT)
       `uvm_field_object(debug_cfg           , UVM_DEFAULT)
@@ -220,10 +224,19 @@ constraint cve2_riscv_cons {
       soft obi_memory_data_cfg.drv_slv_rvalid_random_latency_max <= 3;
       soft obi_memory_data_cfg.drv_slv_rvalid_fixed_latency      <= 3;
 
+      isacov_cfg.enabled                    == 1;
+      isacov_cfg.seq_instr_group_x2_enabled == 1;
+      isacov_cfg.seq_instr_group_x3_enabled == 1;
+      isacov_cfg.seq_instr_group_x4_enabled == 0;
+      isacov_cfg.seq_instr_x2_enabled       == 1;
+      isacov_cfg.reg_crosses_enabled        == 0;
+      isacov_cfg.reg_hazards_enabled        == 1;
+
       rvfi_cfg.nret                      == 1;
       unified_traps                      == 1;
 
       if (is_active == UVM_ACTIVE) {
+         isacov_cfg.is_active            == UVM_PASSIVE;
          clknrst_cfg.is_active           == UVM_ACTIVE;
          interrupt_cfg.is_active         == UVM_ACTIVE;
          debug_cfg.is_active             == UVM_ACTIVE;
@@ -235,12 +248,17 @@ constraint cve2_riscv_cons {
          clknrst_cfg.trn_log_enabled           == 1;
          interrupt_cfg.trn_log_enabled         == 1;
          debug_cfg.trn_log_enabled             == 1;
+         isacov_cfg.trn_log_enabled            == 1;
          obi_memory_instr_cfg.trn_log_enabled  == 1;
          obi_memory_data_cfg.trn_log_enabled   == 1;
          rvfi_cfg.trn_log_enabled              == 1;
       }
+      else{
+         isacov_cfg.trn_log_enabled            == 0;
+      }
 
       if (cov_model_enabled) {
+         isacov_cfg.cov_model_enabled            == 1;
          obi_memory_instr_cfg.cov_model_enabled  == 1;
          obi_memory_data_cfg.cov_model_enabled   == 1;
       }
@@ -268,6 +286,7 @@ function uvme_cv32e20_cfg_c::new(string name="uvme_cv32e20_cfg");
    super.new(name);
 
    core_name             = "cve2";
+   isacov_cfg           = uvma_isacov_cfg_c::type_id::create("isacov_cfg");
    clknrst_cfg           = uvma_clknrst_cfg_c   ::type_id::create("clknrst_cfg"         );
    interrupt_cfg         = uvma_interrupt_cfg_c ::type_id::create("interrupt_cfg"       );
    debug_cfg             = uvma_debug_cfg_c     ::type_id::create("debug_cfg"           );
@@ -276,6 +295,7 @@ function uvme_cv32e20_cfg_c::new(string name="uvme_cv32e20_cfg");
 
    rvfi_cfg              = uvma_rvfi_cfg_c#(ILEN,XLEN)::type_id::create("rvfi_cfg");
 
+   isacov_cfg.core_cfg = this;
    rvfi_cfg.core_cfg = this;
 
 endfunction : new
