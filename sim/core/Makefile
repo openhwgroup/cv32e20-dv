@@ -291,7 +291,7 @@ gen:
 	@$(MAKE) -C ../../external/act4/ clean
 	@echo "* Generating ACT4.0 tests..."
 	@$(MAKE) -C ../../external/act4/ \
-		EXTENSIONS=I,M,C,Zca,Zicsr,Zifencei \
+		EXTENSIONS=I,M,C,Zca,Zicsr,Zifencei,Sm \
 		CV_SW_MARCH=rv32imc_zicsr_zifencei \
 		CONFIG_FILES=config/cores/cve2/cv32e20/test_config.yaml
 	@echo "* Tests generated in: $(certification_PROGRAM_RELPATH) "
@@ -307,12 +307,12 @@ certify: verilate
 	SUMMARY="$(VERI_LOG_DIR)/certification_summary.txt"; \
 	echo "RESULT  TEST" > "$$SUMMARY"; \
 	echo "------  ----" >> "$$SUMMARY"; \
-	ROOT="$(certification_PROGRAM_PATH)/rv32i"; \
-	ELFS="$$(find -L "$$ROOT" \( -type f -o -type l \) -a \( -iname '*.elf' -o -iname '*.elf32' \) 2>/dev/null | sort)"; \
+	ROOT="$(certification_PROGRAM_PATH)"; \
+	ELFS="$$(find -L "$$ROOT/rv32i" "$$ROOT/priv" \( -type f -o -type l \) -a \( -iname '*.elf' -o -iname '*.elf32' \) 2>/dev/null | sort)"; \
 	if [ -z "$$ELFS" ]; then \
-	  echo "No .elf files found under $$ROOT"; \
+	  echo "No .elf files found under $$ROOT/{rv32i,priv}"; \
 	  echo "Debug listing (2 levels):"; \
-	  find "$$ROOT" -maxdepth 2 -print || true; \
+	  find "$$ROOT" -maxdepth 3 -print || true; \
 	  exit 2; \
 	fi; \
 	PASS=0; FAIL=0; TOTAL=0; \
