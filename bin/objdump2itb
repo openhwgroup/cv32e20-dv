@@ -110,7 +110,7 @@ def parse(objdump):
     else:
         fp = open(objdump)
 
-    current_cfunction = None
+    current_cfunction = CFunction(0, "<unknown>")
     current_src_file = None
     current_src_line = 0
     current_src_code = ""    

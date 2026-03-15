@@ -79,9 +79,10 @@ ifndef COMPLIANCE_REPO
 $(error Must define a COMPLIANCE_REPO to use the common makefile)
 endif
 
-ifndef DPI_DASM_SPIKE_REPO
-$(warning Must define a DPI_DASM_SPIKE_REPO to use the common makefile)
-endif
+# TODO: uncomment when Spike is integrated
+#ifndef DPI_DASM_SPIKE_REPO
+#$(warning Must define a DPI_DASM_SPIKE_REPO to use the common makefile)
+#endif
 
 ###############################################################################
 # Generate command to clone or symlink the core RTL
@@ -193,15 +194,6 @@ endif
 # CORE-V-VERIF repo var end
 
 ###############################################################################
-# Imperas Instruction Set Simulator
-
-DV_OVPM_HOME    = $(CORE_V_VERIF)/vendor_lib/imperas
-DV_OVPM_MODEL   = $(DV_OVPM_HOME)/imperas_DV_COREV
-DV_OVPM_DESIGN  = $(DV_OVPM_HOME)/design
-OVP_MODEL_DPI   = $(DV_OVPM_MODEL)/bin/Linux64/imperas_CV32.dpi.so
-#OVP_CTRL_FILE   = $(DV_OVPM_DESIGN)/riscv_CV32E40P.ic
-
-###############################################################################
 # Run the yaml2make scripts
 
 ifeq ($(VERBOSE),1)
@@ -210,111 +202,161 @@ else
 YAML2MAKE_DEBUG =
 endif
 
+###############################################################################
+# Fetch CV_SW_ variables from the TEST yaml
 # If the gen_corev-dv target is defined then read in a test defintions file
-YAML2MAKE = $(CORE_V_VERIF)/bin/yaml2make
+YAML2MAKE = $(CV32E20_DV)/bin/yaml2make
 ifneq ($(filter gen_corev-dv,$(MAKECMDGOALS)),)
-ifeq ($(TEST),)
-$(error ERROR must specify a TEST variable with gen_corev-dv target)
-endif
-GEN_FLAGS_MAKE := $(shell $(YAML2MAKE) --test=$(TEST) --yaml=corev-dv.yaml $(YAML2MAKE_DEBUG) --prefix=GEN --core=$(CV_CORE))
-ifeq ($(GEN_FLAGS_MAKE),)
-$(error ERROR Could not find corev-dv.yaml for test: $(TEST))
-endif
-include $(GEN_FLAGS_MAKE)
-endif
-
-# If the test target is defined then read in a test defintions file
-TEST_YAML_PARSE_TARGETS=test waves cov hex clean_hex veri-test dsim-test xrun-test bsp
-ifneq ($(filter $(TEST_YAML_PARSE_TARGETS),$(MAKECMDGOALS)),)
-ifeq ($(TEST),)
-$(error ERROR! must specify a TEST variable)
-endif
-TEST_FLAGS_MAKE := $(shell $(YAML2MAKE) --test=$(TEST) --yaml=test.yaml  $(YAML2MAKE_DEBUG) --run-index=$(u) --prefix=TEST --core=$(CV_CORE))
-ifeq ($(TEST_FLAGS_MAKE),)
-$(error ERROR Could not find test.yaml for test: $(TEST))
-endif
-include $(TEST_FLAGS_MAKE)
+  $(info MAKECMDGOALS contains gen_corev-dv)
+  ifeq ($(TEST),)
+    $(error ERROR must specify a TEST variable with gen_corev-dv target)
+  endif
+  GEN_FLAGS_MAKE := $(shell $(YAML2MAKE) --test=$(TEST) --yaml=corev-dv.yaml $(YAML2MAKE_DEBUG) --prefix=GEN --core=$(CV_CORE))
+  ifeq ($(GEN_FLAGS_MAKE),)
+    $(error ERROR Could not find corev-dv.yaml for test: $(TEST))
+  endif
+  include $(GEN_FLAGS_MAKE)
+else
+  $(info MAKECMDGOALS=$(MAKECMDGOALS) not in set: gen_corev-dv)
 endif
 
 ###############################################################################
-# cfg
-CFGYAML2MAKE = $(CORE_V_VERIF)/bin/cfgyaml2make
-CFG_YAML_PARSE_TARGETS=comp ldgen comp_corev-dv gen_corev-dv test hex clean_hex corev-dv sanity-veri-run bsp
+# Generate and include TEST_FLAGS_MAKE, based on the YAML test description.
+# An example of what is generated is below (not all of these flags are used):
+#       TEST_DESCRIPTION=Simple hello-world sanity test
+#       TEST_NAME=hello-world
+#       TEST_PROGRAM=hello-world
+#       TEST_TEST_DIR=/home/mike/GitHubRepos/MikeOpenHWGroup/core-v-verif/master/cv32e40p/tests/programs/custom/hello-world
+#       TEST_UVM_TEST=uvmt_$(CV_CORE_LC)_firmware_test_c
+TEST_YAML_PARSE_TARGETS=test waves cov hex clean_hex veri-test dsim-test xrun-test bsp check
+ifneq ($(filter $(TEST_YAML_PARSE_TARGETS),$(MAKECMDGOALS)),)
+  $(info MAKECMDGOALS=$(MAKECMDGOALS) is contained in TEST_YAML_PARSE_TARGETS=$(TEST_YAML_PARSE_TARGETS))
+  ifeq ($(TEST),)
+    $(error ERROR! must specify a TEST variable)
+  endif
+  TEST_FLAGS_MAKE := $(shell $(YAML2MAKE) --test=$(TEST) --yaml=test.yaml  $(YAML2MAKE_DEBUG) --run-index=$(u) --prefix=TEST --core=$(CV_CORE))
+  ifeq ($(TEST_FLAGS_MAKE),)
+    $(error ERROR Could not find test.yaml for test: $(TEST))
+  endif
+  include $(TEST_FLAGS_MAKE)
+else
+  $(info MAKECMDGOALS=$(MAKECMDGOALS) not in set: TEST_YAML_PARSE_TARGETS=$(TEST_YAML_PARSE_TARGETS))
+endif
+
+###############################################################################
+# Generate and include CFG_FLAGS_MAKE, based on the YAML test description.
+CFGYAML2MAKE = $(CV32E20_DV)/bin/cfgyaml2make
+CFG_YAML_PARSE_TARGETS=comp ldgen comp_corev-dv gen_corev-dv test hex clean_hex corev-dv sanity-veri-run bsp check
 ifneq ($(filter $(CFG_YAML_PARSE_TARGETS),$(MAKECMDGOALS)),)
-ifneq ($(CFG),)
-CFG_FLAGS_MAKE := $(shell $(CFGYAML2MAKE) --yaml=$(CFG).yaml $(YAML2MAKE_DEBUG) --prefix=CFG --core=$(CV_CORE))
-ifeq ($(CFG_FLAGS_MAKE),)
-$(error ERROR Error finding or parsing configuration: $(CFG).yaml)
-endif
-include $(CFG_FLAGS_MAKE)
-endif
+  $(info MAKECMDGOALS=$(MAKECMDGOALS) is contained in CFG_YAML_PARSE_TARGETS=$(CFG_YAML_PARSE_TARGETS))
+  ifeq ($(CFG),)
+    $(info CFG variable not specified)
+  else
+    $(info CFG=$(CFG))
+  endif
+  CFG_FLAGS_MAKE := $(shell $(CFGYAML2MAKE) --yaml=$(CFG).yaml $(YAML2MAKE_DEBUG) --prefix=CFG --core=$(CV_CORE))
+  ifeq ($(CFG_FLAGS_MAKE),)
+    $(error ERROR Error finding or parsing configuration: $(CFG).yaml)
+  endif
+  include $(CFG_FLAGS_MAKE)
+else
+  $(info MAKECMDGOALS=$(MAKECMDGOALS) not in set: CFG_YAML_PARSE_TARGETS=$(CFG_YAML_PARSE_TARGETS))
 endif
 
 ###############################################################################
 # Determine the values of the CV_SW_ variables.
 # The priority order is ENV > TEST > CFG.
+ifndef __ALWAYS_PRINT_THESE_MSGS__
+  $(info *******************************************************************************************)
+  $(info * Values of the CV_SW_* variables:)
+  $(info *******************************************************************************************)
+else
+  $(error __ALWAYS_PRINT_THESE_MSGS__ should not be defined.)
+endif
 
 ifndef CV_SW_TOOLCHAIN
-ifdef  TEST_CV_SW_TOOLCHAIN
-CV_SW_TOOLCHAIN = $(TEST_CV_SW_TOOLCHAIN)
+  ifdef  TEST_CV_SW_TOOLCHAIN
+    CV_SW_TOOLCHAIN = $(TEST_CV_SW_TOOLCHAIN)
+    $(info CV_SW_TOOLCHAIN = $(CV_SW_TOOLCHAIN))
+  else
+    ifdef  CFG_CV_SW_TOOLCHAIN
+      CV_SW_TOOLCHAIN = $(CFG_CV_SW_TOOLCHAIN)
+      $(info CV_SW_TOOLCHAIN = $(CV_SW_TOOLCHAIN))
+    else
+      $(error CV_SW_TOOLCHAIN not defined in either the shell environment, test.yaml or cfg.yaml)
+    endif
+  endif
 else
-ifdef  CFG_CV_SW_TOOLCHAIN
-CV_SW_TOOLCHAIN = $(CFG_CV_SW_TOOLCHAIN)
-else
-$(error CV_SW_TOOLCHAIN not defined in either the shell environment, test.yaml or cfg.yaml)
-endif
-endif
+  $(info CV_SW_TOOLCHAIN = $(CV_SW_TOOLCHAIN))
 endif
 
 ifndef CV_SW_PREFIX
-ifdef  TEST_CV_SW_PREFIX
-CV_SW_PREFIX = $(TEST_CV_SW_PREFIX)
+  ifdef  TEST_CV_SW_PREFIX
+    CV_SW_PREFIX = $(TEST_CV_SW_PREFIX)
+    $(info CV_SW_PREFIX = $(CV_SW_PREFIX))
+  else
+    ifdef  CFG_CV_SW_PREFIX
+      CV_SW_PREFIX = $(CFG_CV_SW_PREFIX)
+      $(info CV_SW_PREFIX = $(CV_SW_PREFIX))
+    else
+      $(error CV_SW_PREFIX not defined in either the shell environment, test.yaml or cfg.yaml)
+    endif
+  endif
 else
-ifdef  CFG_CV_SW_PREFIX
-CV_SW_PREFIX = $(CFG_CV_SW_PREFIX)
-else
-$(error CV_SW_PREFIX not defined in either the shell environment, test.yaml or cfg.yaml)
-endif
-endif
+  $(info CV_SW_PREFIX = $(CV_SW_PREFIX))
 endif
 
 ifndef CV_SW_MARCH
-ifdef  TEST_CV_SW_MARCH
-CV_SW_MARCH = $(TEST_CV_SW_MARCH)
+  ifdef  TEST_CV_SW_MARCH
+    CV_SW_MARCH = $(TEST_CV_SW_MARCH)
+    $(info CV_SW_MARCH = $(CV_SW_MARCH))
+  else
+    ifdef  CFG_CV_SW_MARCH
+      CV_SW_MARCH = $(CFG_CV_SW_MARCH)
+      $(info CV_SW_MARCH = $(CV_SW_MARCH))
+    else
+      CV_SW_MARCH = rv32imc
+      $(error CV_SW_MARCH not defined in either the shell environment, test.yaml or cfg.yaml)
+    endif
+  endif
 else
-ifdef  CFG_CV_SW_MARCH
-CV_SW_MARCH = $(CFG_CV_SW_MARCH)
-else
-CV_SW_MARCH = rv32imc
-$(warning CV_SW_MARCH not defined in either the shell environment, test.yaml or cfg.yaml)
-endif
-endif
+  $(info CV_SW_MARCH = $(CV_SW_MARCH))
 endif
 
 ifndef CV_SW_CC
-ifdef  TEST_CV_SW_CC
-CV_SW_CC = $(TEST_CV_SW_CC)
+  ifdef  TEST_CV_SW_CC
+    CV_SW_CC = $(TEST_CV_SW_CC)
+    $(info CV_SW_CC = $(CV_SW_CC))
+  else
+    ifdef  CFG_CV_SW_CC
+      CV_SW_CC = $(CFG_CV_SW_CC)
+      $(info CV_SW_CC = $(CV_SW_CC))
+    else
+      CV_SW_CC = gcc
+      $(info CV_SW_CC not defined in either the shell environment, test.yaml or cfg.yaml - setting to $(CV_SW_CC))
+    endif
+  endif
 else
-ifdef  CFG_CV_SW_CC
-CV_SW_CC = $(CFG_CV_SW_CC)
-else
-CV_SW_CC = gcc
-$(warning CV_SW_CC not defined in either the shell environment, test.yaml or cfg.yaml)
-endif
-endif
+  $(info CV_SW_CC = $(CV_SW_CC))
 endif
 
-ifndef CV_SW_CFLAGS
-ifdef  TEST_CV_SW_CFLAGS
-CV_SW_CFLAGS = $(TEST_CV_SW_CFLAGS)
-else
-ifdef  CFG_CV_SW_CFLAGS
-CV_SW_CFLAGS = $(CFG_CV_SW_CFLAGS)
-else
-$(warning CV_SW_CFLAGS not defined in either the shell environment, test.yaml or cfg.yaml)
-endif
-endif
-endif
+# TODO: add CV_SW_CFLAG to YAML2MAKE
+#ifndef CV_SW_CFLAGS
+#  ifdef  TEST_CV_SW_CFLAGS
+#    CV_SW_CFLAGS = $(TEST_CV_SW_CFLAGS)
+#  else
+#    ifdef  CFG_CV_SW_CFLAGS
+#      CV_SW_CFLAGS = $(CFG_CV_SW_CFLAGS)
+#    else
+#      $(error CV_SW_CFLAGS not defined in either the shell environment, test.yaml or cfg.yaml)
+#    endif
+#  endif
+#else
+#  $(info CV_SW_CFLAGS = $(CV_SW_CFLAGS))
+#endif
+
+###############################################################################
+# Determine the values of the RISC_ variables.
 
 RISCV            = $(CV_SW_TOOLCHAIN)
 RISCV_PREFIX     = $(CV_SW_PREFIX)
@@ -324,33 +366,38 @@ RISCV_MARCH      = $(CV_SW_MARCH)
 RISCV_CC         = $(CV_SW_CC)
 RISCV_CFLAGS     = $(CV_SW_CFLAGS)
 
-CFLAGS ?= -Os -g -static -mabi=ilp32 -march=$(RISCV_MARCH) -Wall -pedantic $(RISCV_CFLAGS)
+#CFLAGS ?= -Os -g -static -mabi=ilp32 -march=$(RISCV_MARCH) -Wall -pedantic $(RISCV_CFLAGS)
+CFLAGS ?= -Os -g -static -mabi=ilp32 -march=$(RISCV_MARCH) $(RISCV_CFLAGS)
 
-$(warning RISCV set to $(RISCV))
-$(warning RISCV_PREFIX set to $(RISCV_PREFIX))
-$(warning RISCV_EXE_PREFIX set to $(RISCV_EXE_PREFIX))
-$(warning RISCV_MARCH set to $(RISCV_MARCH))
-$(warning RISCV_CC set to $(RISCV_CC))
-$(warning RISCV_CFLAGS set to $(RISCV_CFLAGS))
-#$(error STOP IT!)
+ifndef __ALWAYS_PRINT_THESE_MSGS__
+  $(info *******************************************************************************************)
+  $(info * Values of the RISCV_* variables:)
+  $(info *******************************************************************************************)
+else
+  $(error __ALWAYS_PRINT_THESE_MSGS__ should not be defined.)
+endif
+$(info RISCV            = $(RISCV))
+$(info RISCV_PREFIX     = $(RISCV_PREFIX))
+$(info RISCV_EXE_PREFIX = $(RISCV_EXE_PREFIX))
+$(info RISCV_MARCH      = $(RISCV_MARCH))
+$(info RISCV_CC         = $(RISCV_CC))
+$(info RISCV_CFLAGS     = $(RISCV_CFLAGS))
 
-# Keeping this around just in case it is needed again
-#ifeq ($(firstword $(subst _, ,$(TEST))),pulp)
-#  CFLAGS = -Os -g -D__riscv__=1 -D__LITTLE_ENDIAN__=1 -march=rv32imcxpulpv2 -Wa,-march=rv32imcxpulpv2 -fdata-sections -ffunction-sections -fdiagnostics-color=always
-#endif
-
+# TODO: are these still necessary?
 ASM       ?= ../../tests/asm
 ASM_DIR   ?= $(ASM)
 
+###############################################################################
 # CORE FIRMWARE vars. The C and assembler test-programs
 # were once collectively known as "Core Firmware".
+# TODO: are these still necessary?
 #
 # Note that the DSIM targets allow for writing the log-files to arbitrary
 # locations, so all of these paths are absolute, except those used by Verilator.
-#CORE_TEST_DIR                        = $(CORE_V_VERIF)/$(CV_CORE_LC)/tests/programs
-#BSP                                  = $(CORE_V_VERIF)/$(CV_CORE_LC)/bsp
-CORE_TEST_DIR                        = $(CORE_V_VERIF)/tests/programs
-BSP                                  = $(CORE_V_VERIF)/bsp
+#CORE_TEST_DIR                        = $(CV32E20_DV)/$(CV_CORE_LC)/tests/programs
+#BSP                                  = $(CV32E20_DV)/$(CV_CORE_LC)/bsp
+CORE_TEST_DIR                        = $(CV32E20_DV)/tests/programs
+BSP                                  = $(CV32E20_DV)/bsp
 FIRMWARE                             = $(CORE_TEST_DIR)/firmware
 VERI_FIRMWARE                        = ../../tests/core/firmware
 ASM_PROG                            ?= my_hello_world
@@ -405,29 +452,6 @@ FIRMWARE_UNIT_TEST_OBJS   =  	$(addsuffix .o, \
 # Thales verilator testbench compilation end
 
 ###############################################################################
-# The sanity rule runs whatever is currently deemed to be the minimal test that
-# must be able to run (and pass!) prior to generating a pull-request.
-sanity: hello-world
-
-
-###############################################################################
-# Code generators
-# New agent is pulled from moore.io temp site
-new-agent:
-	mkdir -p $(CORE_V_VERIF)/temp
-	wget --no-check-certificate -q https://mooreio.com/packages/uvm_gen.tgz -P $(CORE_V_VERIF)/temp
-	tar xzf $(CORE_V_VERIF)/temp/uvm_gen.tgz -C $(CORE_V_VERIF)/temp
-	cd $(CORE_V_VERIF)/temp && ./src/new_agent_basic.py $(CORE_V_VERIF)/lib/uvm_agents "OpenHW Group"
-	rm -rf $(CORE_V_VERIF)/temp
-
-
-
-# corev-dv tests needs an added run_index_suffix, blank for other tests
-ifeq ($(shell echo $(TEST) | head -c 6),corev_)
-export OPT_RUN_INDEX_SUFFIX=_$(RUN_INDEX)
-endif
-
-###############################################################################
 # Rule to generate hex (loadable by simulators) from elf
 #    $@ is the file being generated.
 #    $< is first prerequiste.
@@ -448,12 +472,12 @@ endif
 		-S \
 		$*.elf > $*.objdump
 	$(RISCV_EXE_PREFIX)objdump \
-    	-d \
-        -S \
+		-d \
+		-S \
 		-M no-aliases \
 		-M numeric \
-        -l \
-		$*.elf | ${CORE_V_VERIF}/bin/objdump2itb - > $*.itb
+		-l \
+		$*.elf | $(CV32E20_DV)/bin/objdump2itb - > $*.itb
 
 # Patterned targets to generate ELF.  Used only if explicit targets do not match.
 #
@@ -494,6 +518,29 @@ ifeq ($(TEST_FIXED_ELF),1)
 	mkdir -p $(SIM_TEST_PROGRAM_RESULTS)
 	cp $(TEST_TEST_DIR)/$(TEST).elf $@
 else
+ifeq ($(TEST_ACT),1)
+%.elf: $(TEST_FILES)
+	mkdir -p $(SIM_TEST_PROGRAM_RESULTS)
+	make bsp ACT=1
+	@echo "$(BANNER)"
+	@echo "* Compiling ACT test-program $@"
+	@echo "$(BANNER)"
+	$(RISCV_EXE_PREFIX)$(RISCV_CC) \
+		$(CFG_CFLAGS) \
+		$(TEST_CFLAGS) \
+		$(RISCV_CFLAGS) \
+		-DSELFCHECK -DSIGNATURE -DXLEN=32 -DFLEN=32 \
+		-I $(BSP) \
+		-I $(ACT_MACROS) \
+		-o $@ \
+		-nostartfiles \
+		$(TEST_FILES) \
+		-T $(LD_FILE) \
+		$(LD_LIBRARY)
+#		-Wno-variadic-macros \
+#		-lcv-verif
+
+else
 %.elf: $(TEST_FILES)
 	mkdir -p $(SIM_TEST_PROGRAM_RESULTS)
 	make bsp
@@ -513,6 +560,7 @@ else
 		$(LD_LIBRARY) \
 		-lcv-verif
 endif
+endif
 
 .PHONY: hex
 
@@ -527,6 +575,7 @@ bsp:
 	cp $(BSP)/Makefile $(SIM_BSP_RESULTS)
 	make -C $(SIM_BSP_RESULTS) \
 		VPATH=$(BSP) \
+		ACT=$(ACT) \
 		RISCV=$(RISCV) \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
 		RISCV_EXE_PREFIX=$(RISCV_EXE_PREFIX) \
@@ -701,8 +750,8 @@ dpi_dasm: $(DPI_DASM_SPIKE_PKG)
 ###############################################################################
 # Build vendor/riscv-isa-sim into tools/
 
-export SPIKE_PATH  = $(CV_VERIF_PKG)/vendor/riscv/riscv-isa-sim
-export SPIKE_INSTALL_DIR = $(CORE_V_VERIF)/tools/spike/
+export SPIKE_PATH  = $(CV32E20_DV)/vendor/riscv/riscv-isa-sim
+export SPIKE_INSTALL_DIR = $(CV32E20_DV)/tools/spike/
 SPIKE_LIBS_DIR = $(SPIKE_INSTALL_DIR)/lib/
 SPIKE_FESVR_LIB = $(SPIKE_LIBS_DIR)/libfesvr
 SPIKE_RISCV_LIB = $(SPIKE_LIBS_DIR)/libriscv
@@ -713,6 +762,9 @@ SPIKE_YAML_LIB = $(SPIKE_LIBS_DIR)/libyaml-cpp
 NUM_JOBS ?= 8
 
 $(SPIKE_FESVR_LIB).so $(SPIKE_RISCV_LIB).so:
+	@echo "$(BANNER)"
+	@echo "Building SPIKE"
+	@echo "$(BANNER)"
 	mkdir -p $(SPIKE_PATH)/build;
 	[ ! -f $(SPIKE_PATH)/build/config.log ] && cd $(SPIKE_PATH)/build && ../configure --prefix=$(SPIKE_INSTALL_DIR) || true
 	make -C $(SPIKE_PATH)/build/ -j $(NUM_JOBS) install;
@@ -722,8 +774,8 @@ spike_lib: $(SPIKE_FESVR_LIB).so $(SPIKE_RISCV_LIB).so
 ###############################################################################
 # Build SVLIB DPI
 
-SVLIB_PKG        := $(CORE_V_VERIF)/vendor_lib/verilab/svlib
-export SVLIB_PKG  = $(CORE_V_VERIF)/vendor_lib/verilab/svlib
+SVLIB_PKG        := $(CV32E20_DV)/vendor_lib/verilab/svlib
+export SVLIB_PKG  = $(CV32E20_DV)/vendor_lib/verilab/svlib
 
 
 SVLIB_SRC    = $(SVLIB_PKG)/svlib/src/dpi/svlib_dpi.c
@@ -758,17 +810,6 @@ rvvi_stub:
 	@echo "Building $(RVVI_STUB)"
 	@echo "$(BANNER)"
 	$(RVVI_STUB_CXX) $(RVVI_STUB_CFLAGS) $(RVVI_STUB_SRC) -I$(DPI_INCLUDE) -o $(RVVI_STUB_LIB)
-
-###############################################################################
-.PHONY: firmware-clean
-firmware-clean:
-	rm -vrf $(addprefix $(FIRMWARE)/firmware., elf bin hex map) \
-		$(FIRMWARE_OBJS) $(FIRMWARE_TEST_OBJS) $(COMPLIANCE_TEST_OBJS)
-
-.PHONY: firmware-unit-test-clean
-firmware-unit-test-clean:
-	rm -vrf $(addprefix $(FIRMWARE)/firmware_unit_test., elf bin hex map) \
-		$(FIRMWARE_OBJS) $(FIRMWARE_UNIT_TEST_OBJS)
 
 #endend
 

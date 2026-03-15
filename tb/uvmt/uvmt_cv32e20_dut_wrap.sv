@@ -132,7 +132,7 @@ module uvmt_cv32e20_dut_wrap #(
 
          .hart_id_i              ( 32'h0000_0000                  ),
          //.boot_addr_i            ( core_cntrl_if.boot_addr       ), //<---MJS changing to 0
-         .boot_addr_i            ( 32'h0000_0000                  ),
+         .boot_addr_i            ( 32'h0000_0100                  ),
 
   // Instruction memory interface
          .instr_req_o            ( obi_memory_instr_if.req        ), // core to agent

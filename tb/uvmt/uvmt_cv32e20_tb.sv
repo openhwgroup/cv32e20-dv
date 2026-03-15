@@ -385,8 +385,8 @@ module uvmt_cv32e20_tb;
 
       void'(uvm_config_db#(bit)::get(null, "", "sim_finished", sim_finished));
 
-      // Shutdown the Reference Model
-      void'(rvviRefShutdown());
+      // FIXME: Shutdown the Reference Model
+      //void'(rvviRefShutdown());
 
       // In most other contexts, calls to $display() in a UVM environment are
       // illegal. Here they are OK because the UVM environment has shut down

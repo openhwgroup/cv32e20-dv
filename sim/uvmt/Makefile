@@ -23,9 +23,11 @@
 ###############################################################################
 
 # "Constants"
+# TODO: unify CORE_V_VERIF and CV32E20_DV into single variable (perhaps CV_DV?).
 MAKE                  = make
 MAKE_PATH            := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 export CORE_V_VERIF   = $(abspath $(MAKE_PATH)/../..)
+export CV32E20_DV     = $(abspath $(MAKE_PATH)/../..)
 export CV_CORE       ?= cv32e20
 
 DPI_DASM_SPIKE_REPO  ?= https://github.com/riscv/riscv-isa-sim.git
@@ -44,4 +46,4 @@ COMPILE_SPIKE=YES
 ISS ?= SPIKE
 
 include ../ExternalRepos.mk
-include $(CORE_V_VERIF)/mk/uvmt/uvmt.mk
+include $(CV32E20_DV)/mk/uvmt/uvmt.mk
