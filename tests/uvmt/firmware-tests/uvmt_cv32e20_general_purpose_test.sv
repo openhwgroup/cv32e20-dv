@@ -87,25 +87,25 @@ task uvmt_cv32e20_general_purpose_test_c::run_phase(uvm_phase phase);
 
    // The RVFI Agent needs to be writting to it AP, otherwise the reference
    // model and ISA functional coverage model have nothing to proces.
-   env.rvfi_agent.instr_monitor.cfg.ap_write_en = 1;
-   `uvm_info("TEST", "Writing to RVFI Agent's instruction monitor Analysis Port enabled", UVM_NONE)
+   env.rvfi_agent.instr_monitor.cfg.ap_write_en = env.cfg.cov_model_enabled || env.cfg.scoreboard_enabled;
+   `uvm_info("TEST", $sformatf("Writing to RVFI Agent's instruction monitor Analysis Port enabled: %0b", env.rvfi_agent.instr_monitor.cfg.ap_write_en), UVM_NONE)
 
    if ($test$plusargs("gen_random_debug")) begin
-    fork
-      random_debug();
-    join_none
+      fork
+         random_debug();
+      join_none
    end
 
    if ($test$plusargs("gen_irq_noise")) begin
-    fork
-      irq_noise();
-    join_none
+      fork
+         irq_noise();
+      join_none
    end
 
    if ($test$plusargs("random_fetch_toggle")) begin
-     fork
-       random_fetch_toggle();
-     join_none
+      fork
+         random_fetch_toggle();
+      join_none
    end
 
    if ($test$plusargs("reset_debug")) begin
@@ -158,8 +158,13 @@ endtask
 function void uvmt_cv32e20_general_purpose_test_c::build_phase(uvm_phase phase);
        super.build_phase(phase);
 
-       `uvm_info("TEST", "Overriding Reference Model with Spike", UVM_NONE)
-       set_type_override_by_type(uvmc_rvfi_reference_model#()::get_type(),uvmc_rvfi_spike#()::get_type());
+       if (!$test$plusargs("NO_ISS")) begin
+          `uvm_info("TEST", "Overriding Reference Model with Spike", UVM_NONE)
+          set_type_override_by_type(uvmc_rvfi_reference_model#()::get_type(),uvmc_rvfi_spike#()::get_type());
+       end
+       else begin
+          `uvm_info("TEST", "Skipping Reference Model override (NO_ISS set)", UVM_NONE)
+       end
 
 endfunction : build_phase
 

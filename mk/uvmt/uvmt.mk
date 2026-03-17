@@ -215,9 +215,8 @@ export DESIGN_RTL_DIR = $(CV_CORE_PKG)/rtl
 RTLSRC_HOME   := $(CV_CORE_PKG)/rtl
 RTLSRC_INCDIR := $(RTLSRC_HOME)/include
 
+
 # CORE-V-VERIF
-#CV_VERIF_PKG        := $(CV32E20_DV)/$(CV_CORE_LC)/vendor_lib/openhwgroup_core-v-verif
-#export CV_VERIF_PKG  = $(CV32E20_DV)/$(CV_CORE_LC)/vendor_lib/openhwgroup_core-v-verif
 CV_VERIF_PKG        := $(CV32E20_DV)/vendor_lib/openhwgroup_core-v-verif
 export CV_VERIF_PKG  = $(CV32E20_DV)/vendor_lib/openhwgroup_core-v-verif
 

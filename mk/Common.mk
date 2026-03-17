@@ -745,7 +745,6 @@ DPI_DASM_INC    = -I$(DPI_DASM_PKG) -I$(DPI_INCLUDE) -I$(DPI_DASM_SPIKE_PKG)/ris
 DPI_DASM_CXX    = g++
 
 dpi_dasm: $(DPI_DASM_SPIKE_PKG)
-	$(CLONE_DPI_DASM_SPIKE_CMD)
 	$(DPI_DASM_CXX) $(DPI_DASM_CFLAGS) $(DPI_DASM_INC) $(DPI_DASM_SRC) -o $(DPI_DASM_LIB)
 
 ###############################################################################
@@ -768,8 +767,6 @@ $(SPIKE_FESVR_LIB).so $(SPIKE_RISCV_LIB).so:
 	@echo "$(BANNER)"
 	mkdir -p $(SPIKE_PATH)/build;
 	[ ! -f $(SPIKE_PATH)/build/config.log ] && cd $(SPIKE_PATH)/build && ../configure --prefix=$(SPIKE_INSTALL_DIR) || true
-	make -C $(SPIKE_PATH)/build/ -j $(NUM_JOBS) yaml-cpp-static;
-	make -C $(SPIKE_PATH)/build/ -j $(NUM_JOBS) yaml-cpp;
 	make -C $(SPIKE_PATH)/build/ -j $(NUM_JOBS) install;
 
 spike_lib: $(SPIKE_FESVR_LIB).so $(SPIKE_RISCV_LIB).so

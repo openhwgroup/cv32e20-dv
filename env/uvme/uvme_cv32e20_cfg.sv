@@ -321,6 +321,16 @@ function void uvme_cv32e20_cfg_c::pre_randomize();
       max_data_zero_instr_stall = 1;
    end
 
+   // Performance control plusargs
+   if ($test$plusargs("scoreboard_enabled=0")) begin
+      scoreboard_enabled = 0;
+      scoreboard_enabled.rand_mode(0);
+   end
+   if ($test$plusargs("cov_model_enabled=0")) begin
+      cov_model_enabled = 0;
+      cov_model_enabled.rand_mode(0);
+   end
+
 endfunction : pre_randomize
 
 
