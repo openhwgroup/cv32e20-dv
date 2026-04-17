@@ -46,6 +46,7 @@ module uvmt_cv32e20_tb;
    parameter int ENV_PARAM_INSTR_ADDR_WIDTH  = 32;
    parameter int ENV_PARAM_INSTR_DATA_WIDTH  = 32;
    parameter int ENV_PARAM_RAM_ADDR_WIDTH    = 22;
+   parameter bit ENABLE_STEP_COMPARE         = 0;
 
    // Capture regs for test status from Virtual Peripheral in dut_wrap.mem_i
    bit        tp;
@@ -73,8 +74,16 @@ module uvmt_cv32e20_tb;
    uvmt_cv32e20_core_status_if     core_status_if(.core_busy(),
                                                    .sec_lvl());     // Core status outputs
 
-   // Step and compare interface
-   uvmt_cv32e20_step_compare_if step_compare_if();
+   generate
+      if (ENABLE_STEP_COMPARE) begin : gen_step_compare
+         // Step and compare interface
+         uvmt_cv32e20_step_compare_if step_compare_if();
+         uvmt_cv32e20_step_compare step_compare (
+            .clknrst_if      (clknrst_if     ),
+            .step_compare_if (step_compare_if)
+         );
+      end
+   endgenerate
    uvmt_cv32e20_isa_covg_if     isa_covg_if();
 
    bind cve2_core
@@ -299,7 +308,9 @@ module uvmt_cv32e20_tb;
      uvm_config_db#(virtual uvmt_cv32e20_vp_status_if         )::set(.cntxt(null), .inst_name("*"),                            .field_name("vp_status_vif"),    .value(vp_status_if)                               );
      uvm_config_db#(virtual uvme_cv32e20_core_cntrl_if        )::set(.cntxt(null), .inst_name("*"),                            .field_name("core_cntrl_vif"),   .value(core_cntrl_if)                              );
      uvm_config_db#(virtual uvmt_cv32e20_core_status_if       )::set(.cntxt(null), .inst_name("*"),                            .field_name("core_status_vif"),  .value(core_status_if)                             );
-     uvm_config_db#(virtual uvmt_cv32e20_step_compare_if      )::set(.cntxt(null), .inst_name("*"),                            .field_name("step_compare_vif"), .value(step_compare_if)                            );
+     if (ENABLE_STEP_COMPARE) begin
+       uvm_config_db#(virtual uvmt_cv32e20_step_compare_if      )::set(.cntxt(null), .inst_name("*"),                            .field_name("step_compare_vif"), .value(gen_step_compare.step_compare_if)                            );
+     end
      uvm_config_db#(virtual uvmt_cv32e20_isa_covg_if          )::set(.cntxt(null), .inst_name("*"),                            .field_name("isa_covg_vif"),     .value(isa_covg_if)                                );
      uvm_config_db#(virtual uvmt_cv32e20_debug_cov_assert_if  )::set(.cntxt(null), .inst_name("*.env"),                        .field_name("debug_cov_vif"),    .value(debug_cov_assert_if)                        );
      uvm_config_db#(virtual uvmt_cv32e20_vp_status_if         )::set(.cntxt(null), .inst_name("*.env"),                        .field_name("vp_status_vif"),    .value(vp_status_if)                               );
