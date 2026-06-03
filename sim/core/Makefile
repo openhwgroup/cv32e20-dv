@@ -94,6 +94,16 @@ SV_CMP_FLAGS =
 TEST         ?= hello-world
 CFG          ?= default
 
+ifeq ($(TEST),debug_test)
+DEBUG_TEST_HEX_REMAP_CMD = perl -ne 'if (/^\@([0-9A-Fa-f]+)/) { $$a = hex($$1); $$a &= 0x003fffff if $$a > 0x003fffff; printf "\@%08X\n", $$a; } else { print; }' \
+	$(TEST_PROGRAM_PATH)/$(TEST)/$(TEST).hex > \
+	$(TEST_PROGRAM_PATH)/$(TEST)/$(TEST).hex.remap && \
+	mv $(TEST_PROGRAM_PATH)/$(TEST)/$(TEST).hex.remap \
+	$(TEST_PROGRAM_PATH)/$(TEST)/$(TEST).hex
+else
+DEBUG_TEST_HEX_REMAP_CMD = true
+endif
+
 ###############################################################################
 # Common Makefiles:
 #  -Variables for RTL and other dependencies (e.g. RISCV-DV)
@@ -223,6 +233,7 @@ test: verilate $(TEST_PROGRAM_PATH)/$(TEST)/$(TEST).hex
 	@echo "$(BANNER)"
 	@echo "* Running with Verilator: logfile in $(SIM_TEST_RESULTS)/$(TEST).log"
 	@echo "$(BANNER)"
+	$(DEBUG_TEST_HEX_REMAP_CMD)
 	mkdir -p $(VERI_LOG_DIR)
 	$(SIM_TEST_RESULTS)/verilator_executable \
 		$(VERI_RUN_FLAGS) \

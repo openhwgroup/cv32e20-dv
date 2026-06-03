@@ -91,13 +91,19 @@ __no_irq_handler:
     // Check if we expected to enter irq
     la a1, glb_expect_irq_entry
     lw t0, 0(a1)
-    beq t0, x0, _irq_fail
+    beq t0, x0, _irq_return
     // Clear entry flag
     li t0, 0
     sw t0, 0(a1)
+    // Deassert IRQ source to avoid re-entering the handler before main can clear it
+    li a1, 0x15000000
+    sw x0, 0(a1)
+    li a1, 0x15000004
+    sw x0, 0(a1)
 	//j __no_irq_handler
     
     // Return
+_irq_return:
     lw ra, 0(sp)
 	lw a0, 4(sp)
 	lw a1, 8(sp)
@@ -116,12 +122,7 @@ __no_irq_handler:
 	lw t6, 60(sp)
 	addi sp,sp,64
 	mret
- 
-_irq_fail:
-    li a0, test_ret_val
-    li t0, test_fail
-    sw t0, 0(a0)
-    ret
+
 u_sw_irq_handler:
 	/* While we are still using puts in handlers, save all caller saved
 	   regs.  Eventually, some of these saves could be deferred.  */

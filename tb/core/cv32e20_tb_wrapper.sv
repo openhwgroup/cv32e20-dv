@@ -22,6 +22,7 @@ module cv32e20_tb_wrapper
                 RAM_ADDR_WIDTH    = 20,
                 BOOT_ADDR         = 'h80,
                 DM_HALTADDRESS    = 32'h1A11_0800,
+                DM_EXCEPTIONADDRESS = 32'h1A14_0000,
                 HART_ID           = 32'h0000_0000,
                 // Parameters used by DUT
                 MHPMCounterNum    = 10,
