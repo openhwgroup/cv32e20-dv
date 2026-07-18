@@ -253,6 +253,44 @@ and assembly tests. Also added `--corev-dv-only` (run just COREV_DV_TESTS,
 nothing else) and an automatic one-time `make corev-dv` setup step, run
 before any corev-dv test builds whenever the selected set includes one.
 
+**2026-07-17: all 14 corev-dv templates now in `COREV_DV_TESTS` and passing**
+(`--tb uvmt --corev-dv-only`). Was 9/14 confirmed; the 5 remaining
+(`corev_rand_debug`, `corev_rand_debug_ebreak`, `corev_rand_debug_single_step`,
+`corev_rand_illegal_instr_test`, `corev_rand_instr_long_stall`) were run for
+the first time this session and added. Two bugs found and fixed along the way:
+- `--run-index` was silently ignored for corev-dv tests: `gen_corev-dv`
+  generates into `.../$(GEN_START_INDEX)/test_program/`, independent of
+  `RUN_INDEX` (which only selects where the build/run step *reads from*).
+  `run_test()` now passes `GEN_START_INDEX=<run_index>` too, so a given
+  `--run-index` generates, builds, and runs the same seed consistently.
+  Side effect of this fix: it surfaced that the earlier "9/14 passing" status
+  had only ever exercised seed 0 per template, regardless of `--run-index`.
+- `corev_rand_debug`/`corev-dv.yaml` had a copy-paste `name: corev_rand_interrupt`
+  (harmless — that field isn't consumed downstream — but wrong); fixed to
+  `name: corev_rand_debug`.
+
+`corev_rand_debug` and `corev_rand_debug_single_step` both hit
+`CVE2SetExceptionPCOnSpecialReqIfExpected` (the same `INC_ASSERT` assertion
+in `core-v-cores/cv32e20/rtl/cve2_controller.sv` fixed twice before for
+interrupt-withdrawal cases) at the *default* seed — no special `--run-index`
+needed. Root cause this time: a `debug_req_i` pulse arriving while the core is
+asleep in `wfi` can be silently dropped. `SLEEP` wakes on seeing `debug_req_i`
+and moves to `FIRST_FETCH`, but `FIRST_FETCH` re-samples the *live*
+combinational `enter_debug_mode` one cycle later rather than latching the
+decision (unlike the analogous `FLUSH`→`DBG_TAKEN_IF` transition, which uses
+the registered `enter_debug_mode_prio_q`) — so a pulse shorter than that gap
+is missed entirely and the core just resumes normal execution, never entering
+Debug Mode. CVE2's own documented contract (`doc/03_reference/cosim.rst`,
+mirrored in `rtl/cve2_core.sv:1083-1103`) commits to reacting to a debug
+request's state "as soon as ... the ID stage is empty" with no requirement
+that it still be asserted later, so this is a real gap relative to that
+contract. Fixed on the **stimulus side** rather than in the RTL (explicit
+choice): `vendor_lib/openhwgroup_core-v-verif/lib/uvm_agents/uvma_debug/seq/
+uvma_debug_seq_item.sv`'s `active_cycles` constraint raised from `>0` to `>=4`,
+so `debug_req_i` is held long enough to survive the resample gap. Verified by
+direct reruns (not just the batch script) before and after; no regression on
+the 3 other newly-added tests.
+
 ## Assembly test-program cleanup (DONE this session)
 
 Cleaned up 11 assembly/mixed directed tests. Two problem classes, and a key

@@ -31,6 +31,11 @@ run once beforehand to clone and compile the corev-dv/riscv-dv packages
 script runs `make corev-dv` itself before running any tests, and aborts if
 that setup step fails.
 
+For corev-dv tests, --run-index also selects which randomized program is
+generated: run_test() passes it through as both RUN_INDEX (where the build/run
+step looks for the program) and GEN_START_INDEX (where gen_corev-dv writes it),
+so a given --run-index consistently generates, builds, and runs the same seed.
+
 Usage
 -----
 The script needs no arguments and can be run from anywhere (paths are resolved
@@ -65,27 +70,75 @@ PATH, as for a normal `make test`.
     bin/run_tests.py --parse-only
     bin/run_tests.py --tb uvmt --parse-only
 
+    # Run up to 4 tests concurrently (uvmt only is verified safe -- see below):
+    bin/run_tests.py --tb uvmt --corev-dv-only --jobs 4
+
     # Other options:
     #   --cfg NAME      uvmt config subdirectory                (default: default)
     #   --run-index N   RUN_INDEX subdirectory                  (default: 0)
     #   --timeout SECS  per-test timeout                        (default: 1800)
+    #   --jobs N, -j N  run up to N tests concurrently           (default: 1)
     #   --quiet         suppress per-test simulation banners
     #   -h / --help     full option help
 
 Exit status is 0 only when every selected test PASSED, so the script is
 suitable for use as a CI gate.
+
+Concurrency (--jobs)
+--------------------
+By default (--jobs 1) each test runs its own `make test`/`make gen_corev-dv
+test`, which recompiles the design every time (VSIM_RUN_PREREQ=opt unless
+COMP=NO is passed). Running that concurrently would race multiple vlog/vopt
+invocations against the same shared vsim work library
+(sim/uvmt/vsim_results/<cfg>/work) -- a previously-confirmed hazard (lock
+contention or "already an optimized design" errors).
+
+With --jobs > 1 and --tb uvmt, this script instead compiles the design ONCE
+up front (`make comp`, serialized, in addition to the existing one-time `make
+corev-dv` setup for corev-dv tests) and then passes COMP=NO to every test in
+the parallel batch, so workers only run `vsim` against the already-compiled
+design -- each in its own per-test/run-index run directory
+(sim/uvmt/vsim_results/<cfg>/<test>/<run_index>/), which `make`'s `run`
+target `vmap`s back to the shared read-only compiled library. Many `vsim`
+processes reading one compiled snapshot concurrently is a standard, safe
+regression-farm pattern; it's concurrent *compilation* that isn't safe.
+
+Caveat: the corev-dv random-program *generation* step (gen_corev-dv) itself
+runs vsim from within a directory shared by all corev-dv tests
+(vsim_results/<cfg>/corev-dv/), unlike the isolated per-test run directories
+above. This looks benign under concurrency (per-test/idx log files don't
+collide, and the shared `vmap` writes identical content regardless of which
+process wins the race) but has not been independently stress-tested at high
+--jobs counts. Keep an eye on it if you push --jobs high for corev-dv-heavy
+batches.
+
+--tb core (Verilator) has NOT been verified race-free under --jobs > 1: `make
+test` for the core TB also recompiles into a shared directory
+(sim/core/cobj_dir) on every invocation, and no COMP=NO-equivalent skip-flag
+was found for it. Prefer --jobs 1 there unless you've confirmed otherwise.
+
+Also keep the vsim license pool in mind (`lmutil lmstat`) -- each concurrent
+uvmt worker holds its own set of Questa feature licenses (msimhdlsim,
+svverification, mtiverification, ...) for the duration of its run.
 """
 
 import argparse
+import concurrent.futures
 import os
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 # Repository layout: this script lives in <repo>/bin.
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO = SCRIPT_DIR.parent
+
+# Guards stdout so concurrent workers (--jobs > 1) don't interleave lines from
+# different tests mid-block; each worker holds it only long enough to print
+# its own (possibly multi-line) announcement or banner block.
+_print_lock = threading.Lock()
 
 # Per-testbench configuration.  Each entry knows where to run make, which extra
 # make arguments to pass, the verdict banners its testbench prints, and how to
@@ -176,9 +229,6 @@ PARKED = [
 # corev-dv/riscv-dv packages) must have been run once in sim/uvmt; main() does
 # this automatically whenever the selected set includes a corev-dv test.
 #
-# Not yet included: corev_rand_debug, corev_rand_debug_ebreak,
-# corev_rand_debug_single_step, corev_rand_illegal_instr_test,
-# corev_rand_instr_long_stall -- not yet run against the current fixes.
 COREV_DV_TESTS = [
     "corev_rand_arithmetic_base_test",
     "corev_rand_instr_test",
@@ -189,6 +239,11 @@ COREV_DV_TESTS = [
     "corev_rand_interrupt_wfi",
     "corev_rand_interrupt_wfi_mem_stress",
     "corev_rand_jump_stress_test",
+    "corev_rand_debug",
+    "corev_rand_debug_ebreak",
+    "corev_rand_debug_single_step",
+    "corev_rand_illegal_instr_test",
+    "corev_rand_instr_long_stall",
 ]
 
 
@@ -269,8 +324,40 @@ def setup_corev_dv(tb, timeout):
                   "no corev-dv test can build without it")
 
 
-def run_test(tb, test, run_index, cfg, timeout, quiet):
-    """Build+run one test on the chosen testbench; return (outcome, detail)."""
+def setup_comp(tb, timeout):
+    """Run `make comp` once: compiles the main testbench (uvmt_*_tb_vopt) into
+    the shared work library. Required before a --jobs > 1 batch can safely
+    pass COMP=NO to its workers -- without a compiled design already sitting
+    in the shared library, every worker would either fail (nothing to run
+    against) or race to compile it themselves. Aborts the script on failure."""
+    tbcfg = TESTBENCHES[tb]
+    cmd = ["make", "comp"] + tbcfg["make_args"]
+    env = make_env(tbcfg)
+
+    print(f"[Setup/{tb}] make comp (one-time compile for --jobs > 1) ...")
+    try:
+        returncode, _, _ = _run(cmd, tbcfg["sim_dir"], env, timeout, capture=False)
+    except subprocess.TimeoutExpired:
+        sys.exit(f"error: 'make comp' timed out after {timeout}s")
+    except OSError as exc:
+        sys.exit(f"error: could not launch 'make comp': {exc}")
+
+    if returncode != 0:
+        sys.exit(f"error: 'make comp' failed (exit {returncode}); "
+                  "no test can build without it")
+
+
+def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None, label=None):
+    """Build+run one test on the chosen testbench; return (outcome, detail).
+
+    extra_make_args: additional make variable assignments appended to the
+    command line (e.g. ["COMP=NO"] for a --jobs > 1 batch that already had
+    setup_comp() run once beforehand).
+    label: when set (--jobs > 1), prefixes each printed banner line with the
+    test name so concurrent workers' output stays distinguishable; printing
+    is done as one locked block per test so lines from different tests can't
+    interleave mid-line.
+    """
     tbcfg = TESTBENCHES[tb]
     targets = ["gen_corev-dv", "test"] if test in COREV_DV_TESTS else ["test"]
     cmd = ["make"] + targets + [f"TEST={test}", f"RUN_INDEX={run_index}"]
@@ -282,6 +369,8 @@ def run_test(tb, test, run_index, cfg, timeout, quiet):
         # is empty except for the BSP.
         cmd.append(f"GEN_START_INDEX={run_index}")
     cmd += tbcfg["make_args"]
+    if extra_make_args:
+        cmd += extra_make_args
     env = make_env(tbcfg)
 
     try:
@@ -292,9 +381,13 @@ def run_test(tb, test, run_index, cfg, timeout, quiet):
         return "ERROR", f"could not launch make: {exc}"
 
     if not quiet:
-        for line in stdout.splitlines():
-            if any(m in line for m in tbcfg["markers"]):
-                print("    " + line)
+        lines = [line for line in stdout.splitlines()
+                 if any(m in line for m in tbcfg["markers"])]
+        if lines:
+            prefix = f"    [{label}] " if label else "    "
+            with _print_lock:
+                for line in lines:
+                    print(prefix + line)
 
     # The console output is authoritative for the run we just launched; fall
     # back to the on-disk log if the banner did not reach stdout.
@@ -350,7 +443,14 @@ def main():
                          "10-15 minutes including compile)")
     ap.add_argument("--quiet", action="store_true",
                     help="suppress per-test simulation banner output")
+    ap.add_argument("--jobs", "-j", type=int, default=1,
+                    help="run up to N tests concurrently (default: 1, sequential). "
+                         "See the 'Concurrency' section of --help for the safety "
+                         "model (uvmt only is verified race-free; core is not).")
     args = ap.parse_args()
+
+    if args.jobs < 1:
+        ap.error("--jobs must be >= 1")
 
     if args.corev_dv_only:
         if args.tests or args.include_parked or args.include_corev_dv:
@@ -376,17 +476,50 @@ def main():
             sys.exit("error: corev-dv tests require --tb uvmt")
         setup_corev_dv(args.tb, args.timeout)
 
-    results = []
-    width = max(len(t) for t in selected)
-    for test in selected:
+    extra_make_args = []
+    if args.jobs > 1 and not args.parse_only:
+        if args.tb == "uvmt":
+            # One-time serialized compile so the parallel batch below can pass
+            # COMP=NO and safely skip recompilation instead of racing on the
+            # shared vsim work library -- see the "Concurrency" section of
+            # --help for the full explanation.
+            setup_comp(args.tb, args.timeout)
+            extra_make_args = ["COMP=NO"]
+        else:
+            print(f"warning: --jobs {args.jobs} with --tb core has not been "
+                  "verified race-free against the shared Verilator build "
+                  "directory (sim/core/cobj_dir); proceeding anyway, but "
+                  "prefer --jobs 1 unless you've confirmed it's safe.")
+
+    def run_one(test):
         action = "Parsing" if args.parse_only else "Running"
-        print(f"[{action}/{args.tb}] {test} ...")
+        with _print_lock:
+            print(f"[{action}/{args.tb}] {test} ...")
         if args.parse_only:
             outcome, detail = parse_only(args.tb, test, args.run_index, args.cfg)
         else:
             outcome, detail = run_test(args.tb, test, args.run_index, args.cfg,
-                                       args.timeout, args.quiet)
-        results.append((test, outcome, detail))
+                                       args.timeout, args.quiet,
+                                       extra_make_args=extra_make_args,
+                                       label=test if args.jobs > 1 else None)
+        if args.jobs > 1:
+            done = "Parsed" if args.parse_only else "Done"
+            with _print_lock:
+                print(f"[{done}/{args.tb}] {test}: {outcome} {detail}".rstrip())
+        return test, outcome, detail
+
+    width = max(len(t) for t in selected)
+    if args.jobs == 1:
+        results = [run_one(test) for test in selected]
+    else:
+        outcomes = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            futures = [pool.submit(run_one, test) for test in selected]
+            for future in concurrent.futures.as_completed(futures):
+                test, outcome, detail = future.result()
+                outcomes[test] = (test, outcome, detail)
+        # Report in the original --selected order regardless of completion order.
+        results = [outcomes[test] for test in selected]
 
     # Summary.
     print()
