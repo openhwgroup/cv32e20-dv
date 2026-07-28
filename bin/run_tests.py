@@ -31,10 +31,15 @@ run once beforehand to clone and compile the corev-dv/riscv-dv packages
 script runs `make corev-dv` itself before running any tests, and aborts if
 that setup step fails.
 
-For corev-dv tests, --run-index also selects which randomized program is
-generated: run_test() passes it through as both RUN_INDEX (where the build/run
-step looks for the program) and GEN_START_INDEX (where gen_corev-dv writes it),
-so a given --run-index consistently generates, builds, and runs the same seed.
+For corev-dv tests, --run-index also selects which generated program directory
+is used: run_test() passes it through as both RUN_INDEX (where the build/run
+step looks for the program) and GEN_START_INDEX (where gen_corev-dv writes it).
+run_test() also passes SEED=random for every corev-dv test, so each invocation
+uses a fresh RNDSEED (mk/uvmt/uvmt.mk derives it from `date +%N`) for both the
+corev-dv generator and the env-level randomization -- re-running the same
+--run-index does NOT reproduce the same generated program/stimulus anymore.
+The actual seed used is recorded in that run's vsim-<name>.log header
+(`-sv_seed <value>`) for later replay via SEED=<value>.
 
 Usage
 -----
@@ -73,9 +78,17 @@ PATH, as for a normal `make test`.
     # Run up to 4 tests concurrently (uvmt only is verified safe -- see below):
     bin/run_tests.py --tb uvmt --corev-dv-only --jobs 4
 
+    # Replay a specific prior corev-dv run from its logged seeds (gen_corev-dv
+    # and test are independent UVM environments/vsim invocations, each with
+    # their own seed -- see the summary table's GEN_SEED/RUN_SEED columns):
+    bin/run_tests.py --tb uvmt --gen-seed 363891135 --run-seed 354410829 \
+        corev_rand_instr_and_data_stalls
+
     # Other options:
     #   --cfg NAME      uvmt config subdirectory                (default: default)
     #   --run-index N   RUN_INDEX subdirectory                  (default: 0)
+    #   --gen-seed SEED corev-dv generator SEED ('random' or a literal value)
+    #   --run-seed SEED test-step SEED ('random' or a literal value)
     #   --timeout SECS  per-test timeout                        (default: 1800)
     #   --jobs N, -j N  run up to N tests concurrently           (default: 1)
     #   --quiet         suppress per-test simulation banners
@@ -125,6 +138,7 @@ svverification, mtiverification, ...) for the duration of its run.
 import argparse
 import concurrent.futures
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -244,6 +258,7 @@ COREV_DV_TESTS = [
     "corev_rand_debug_single_step",
     "corev_rand_illegal_instr_test",
     "corev_rand_instr_long_stall",
+    "corev_rand_instr_and_data_stalls",
 ]
 
 
@@ -256,6 +271,30 @@ def log_path(tb, test, run_index, cfg):
     # uvmt / vsim
     return (sim_dir / "vsim_results" / cfg / test / str(run_index)
             / f"vsim-{test}.log")
+
+
+def gen_log_path(tb, test, run_index, cfg):
+    """Location of the corev-dv generation step's own log file. This is a
+    fully separate vsim invocation/UVM environment from the test's own
+    vsim-<test>.log (log_path() above) -- gen_corev-dv builds the randomized
+    instruction stream, test builds+runs the firmware -- so it gets its own
+    independent -sv_seed. GEN_NUM_TESTS is never overridden by this script
+    (Makefile default 1), hence the fixed "_1" in the filename."""
+    sim_dir = TESTBENCHES[tb]["sim_dir"]
+    return (sim_dir / "vsim_results" / cfg / "corev-dv" / test
+            / f"{test}_{run_index}_1.log")
+
+
+_SEED_RE = re.compile(r"-sv_seed\s+(\S+)")
+
+
+def extract_seed(text):
+    """Pull the actual -sv_seed value a vsim invocation was run with out of
+    its console output or log file. Needed whenever SEED=random is used --
+    the Makefile picks the real value internally (`date +%N`), so the caller
+    never sees it on the command line it constructed."""
+    m = _SEED_RE.search(text)
+    return m.group(1) if m else None
 
 
 def classify(text, tbcfg):
@@ -347,10 +386,29 @@ def setup_comp(tb, timeout):
                   "no test can build without it")
 
 
-def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None, label=None):
-    """Build+run one test on the chosen testbench; return (outcome, detail).
+def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None,
+             label=None, gen_seed="random", run_seed="random"):
+    """Build+run one test on the chosen testbench; return
+    (outcome, detail, gen_seed_used, run_seed_used).
 
-    extra_make_args: additional make variable assignments appended to the
+    For corev-dv tests, gen_corev-dv (the corev-dv/riscv-dv random program
+    generator) and test (the actual firmware run) are two fully independent
+    UVM environments/vsim invocations that compile and run separately -- so
+    each gets its own `make` invocation and its own independent SEED=
+    assignment, rather than one combined `make gen_corev-dv test` call. That
+    matters for reproduction: a single SEED=<literal value> on one combined
+    invocation would force both steps to the *same* RNDSEED (mk/uvmt/uvmt.mk
+    only re-derives a fresh value from `date +%N` when SEED=random; a literal
+    value is just reused as-is), which can't reproduce a historical run where
+    the two steps happened to draw different random seeds.
+    gen_seed_used/run_seed_used are the actual -sv_seed values each step's
+    vsim was invoked with (extracted from console/log output -- needed
+    whenever SEED=random, since the Makefile picks the real value internally
+    and it never appears on the command line this function constructs).
+    Both are None for non-corev-dv tests, which have no separate generation
+    step and are never given an explicit SEED.
+
+    extra_make_args: additional make variable assignments appended to each
     command line (e.g. ["COMP=NO"] for a --jobs > 1 batch that already had
     setup_comp() run once beforehand).
     label: when set (--jobs > 1), prefixes each printed banner line with the
@@ -359,26 +417,52 @@ def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None, lab
     interleave mid-line.
     """
     tbcfg = TESTBENCHES[tb]
-    targets = ["gen_corev-dv", "test"] if test in COREV_DV_TESTS else ["test"]
-    cmd = ["make"] + targets + [f"TEST={test}", f"RUN_INDEX={run_index}"]
+    env = make_env(tbcfg)
+    gen_seed_used = None
+
     if test in COREV_DV_TESTS:
         # gen_corev-dv generates into <test>/$(GEN_START_INDEX)/test_program/,
         # independently of RUN_INDEX (which only selects where the build/run
         # step looks for that program). Without this, a non-zero --run-index
         # generates into .../0/ but builds/runs out of .../<run_index>/, which
         # is empty except for the BSP.
-        cmd.append(f"GEN_START_INDEX={run_index}")
+        gen_cmd = (["make", "gen_corev-dv", f"TEST={test}",
+                     f"GEN_START_INDEX={run_index}", f"SEED={gen_seed}"]
+                    + tbcfg["make_args"])
+        if extra_make_args:
+            gen_cmd += extra_make_args
+
+        try:
+            returncode, gstdout, gstderr = _run(gen_cmd, tbcfg["sim_dir"], env,
+                                                 timeout, capture=True)
+        except subprocess.TimeoutExpired:
+            return "ERROR", f"gen_corev-dv timed out after {timeout}s", None, None
+        except OSError as exc:
+            return "ERROR", f"could not launch gen_corev-dv make: {exc}", None, None
+
+        gen_seed_used = extract_seed(gstdout + gstderr)
+        if gen_seed_used is None:
+            gpath = gen_log_path(tb, test, run_index, cfg)
+            if gpath.is_file():
+                gen_seed_used = extract_seed(gpath.read_text(errors="replace"))
+
+        if returncode != 0:
+            return ("ERROR", f"gen_corev-dv failed (exit {returncode})",
+                    gen_seed_used, None)
+
+    cmd = ["make", "test", f"TEST={test}", f"RUN_INDEX={run_index}"]
+    if test in COREV_DV_TESTS:
+        cmd.append(f"SEED={run_seed}")
     cmd += tbcfg["make_args"]
     if extra_make_args:
         cmd += extra_make_args
-    env = make_env(tbcfg)
 
     try:
         returncode, stdout, stderr = _run(cmd, tbcfg["sim_dir"], env, timeout, capture=True)
     except subprocess.TimeoutExpired:
-        return "ERROR", f"timed out after {timeout}s"
+        return "ERROR", f"timed out after {timeout}s", gen_seed_used, None
     except OSError as exc:
-        return "ERROR", f"could not launch make: {exc}"
+        return "ERROR", f"could not launch make: {exc}", gen_seed_used, None
 
     if not quiet:
         lines = [line for line in stdout.splitlines()
@@ -392,25 +476,40 @@ def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None, lab
     # The console output is authoritative for the run we just launched; fall
     # back to the on-disk log if the banner did not reach stdout.
     console = stdout + stderr
+    run_seed_used = extract_seed(console)
     outcome = classify(console, tbcfg)
-    if outcome == "ERROR":
+    if outcome == "ERROR" or run_seed_used is None:
         path = log_path(tb, test, run_index, cfg)
         if path.is_file():
-            outcome = classify(path.read_text(errors="replace"), tbcfg)
+            log_text = path.read_text(errors="replace")
+            if outcome == "ERROR":
+                outcome = classify(log_text, tbcfg)
+            if run_seed_used is None:
+                run_seed_used = extract_seed(log_text)
 
     if outcome != "ERROR":
-        return outcome, ""
+        return outcome, "", gen_seed_used, run_seed_used
     if returncode != 0:
-        return "ERROR", f"make exited {returncode}"
-    return "ERROR", "no verdict banner"
+        return "ERROR", f"make exited {returncode}", gen_seed_used, run_seed_used
+    return "ERROR", "no verdict banner", gen_seed_used, run_seed_used
 
 
 def parse_only(tb, test, run_index, cfg):
-    """Read an existing log file without re-running the simulation."""
+    """Read an existing log file without re-running the simulation; return
+    (outcome, detail, gen_seed_used, run_seed_used), same shape as run_test()."""
     path = log_path(tb, test, run_index, cfg)
     if not path.is_file():
-        return "ERROR", "no log file"
-    return classify(path.read_text(errors="replace"), TESTBENCHES[tb]), ""
+        return "ERROR", "no log file", None, None
+
+    text = path.read_text(errors="replace")
+    run_seed_used = extract_seed(text)
+    gen_seed_used = None
+    if test in COREV_DV_TESTS:
+        gpath = gen_log_path(tb, test, run_index, cfg)
+        if gpath.is_file():
+            gen_seed_used = extract_seed(gpath.read_text(errors="replace"))
+
+    return classify(text, TESTBENCHES[tb]), "", gen_seed_used, run_seed_used
 
 
 def main():
@@ -441,6 +540,19 @@ def main():
                     help="per-test timeout in seconds (default: 1800; the "
                          "interrupt-heavy corev-dv templates routinely take "
                          "10-15 minutes including compile)")
+    ap.add_argument("--gen-seed", default="random",
+                    help="SEED for the corev-dv generation step (gen_corev-dv; "
+                         "the random-instruction-stream generator). 'random' "
+                         "(default) or a literal value to replay a specific "
+                         "prior run -- see --run-seed, a fully independent "
+                         "knob (gen_corev-dv and test are separate UVM "
+                         "environments/vsim invocations, each seeded "
+                         "separately). No effect on non-corev-dv tests.")
+    ap.add_argument("--run-seed", default="random",
+                    help="SEED for the test step (the actual firmware run's "
+                         "env-level randomization, e.g. OBI stall knobs). "
+                         "'random' (default) or a literal value to replay a "
+                         "specific prior run. No effect on non-corev-dv tests.")
     ap.add_argument("--quiet", action="store_true",
                     help="suppress per-test simulation banner output")
     ap.add_argument("--jobs", "-j", type=int, default=1,
@@ -496,17 +608,20 @@ def main():
         with _print_lock:
             print(f"[{action}/{args.tb}] {test} ...")
         if args.parse_only:
-            outcome, detail = parse_only(args.tb, test, args.run_index, args.cfg)
+            outcome, detail, gen_seed, run_seed = parse_only(
+                args.tb, test, args.run_index, args.cfg)
         else:
-            outcome, detail = run_test(args.tb, test, args.run_index, args.cfg,
-                                       args.timeout, args.quiet,
-                                       extra_make_args=extra_make_args,
-                                       label=test if args.jobs > 1 else None)
+            outcome, detail, gen_seed, run_seed = run_test(
+                args.tb, test, args.run_index, args.cfg,
+                args.timeout, args.quiet,
+                extra_make_args=extra_make_args,
+                label=test if args.jobs > 1 else None,
+                gen_seed=args.gen_seed, run_seed=args.run_seed)
         if args.jobs > 1:
             done = "Parsed" if args.parse_only else "Done"
             with _print_lock:
                 print(f"[{done}/{args.tb}] {test}: {outcome} {detail}".rstrip())
-        return test, outcome, detail
+        return test, outcome, detail, gen_seed, run_seed
 
     width = max(len(t) for t in selected)
     if args.jobs == 1:
@@ -516,23 +631,36 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
             futures = [pool.submit(run_one, test) for test in selected]
             for future in concurrent.futures.as_completed(futures):
-                test, outcome, detail = future.result()
-                outcomes[test] = (test, outcome, detail)
+                test, outcome, detail, gen_seed, run_seed = future.result()
+                outcomes[test] = (test, outcome, detail, gen_seed, run_seed)
         # Report in the original --selected order regardless of completion order.
         results = [outcomes[test] for test in selected]
 
-    # Summary.
+    # Summary. GEN_SEED/RUN_SEED are "-" for non-corev-dv tests (no generation
+    # step, no explicit SEED given) -- see run_test()'s docstring for why the
+    # two are tracked independently rather than as a single seed.
+    def _fmt_seed(s):
+        return s if s is not None else "-"
+
+    gen_width = max([len("GEN_SEED")] + [len(_fmt_seed(r[3])) for r in results])
+    run_width = max([len("RUN_SEED")] + [len(_fmt_seed(r[4])) for r in results])
+    header = (f"{'TEST'.ljust(width)}   RESULT   "
+              f"{'GEN_SEED'.ljust(gen_width)}   {'RUN_SEED'.ljust(run_width)}   DETAIL")
+    sep_width = len(header)
+
     print()
-    print("=" * (width + 24))
+    print("=" * sep_width)
     print(f"testbench: {args.tb}")
-    print("-" * (width + 24))
-    print(f"{'TEST'.ljust(width)}   RESULT   DETAIL")
-    print("-" * (width + 24))
+    print("-" * sep_width)
+    print(header)
+    print("-" * sep_width)
     counts = {"PASS": 0, "FAIL": 0, "ERROR": 0}
-    for test, outcome, detail in results:
+    for test, outcome, detail, gen_seed, run_seed in results:
         counts[outcome] = counts.get(outcome, 0) + 1
-        print(f"{test.ljust(width)}   {outcome:<6}   {detail}")
-    print("=" * (width + 24))
+        print(f"{test.ljust(width)}   {outcome:<6}   "
+              f"{_fmt_seed(gen_seed).ljust(gen_width)}   "
+              f"{_fmt_seed(run_seed).ljust(run_width)}   {detail}")
+    print("=" * sep_width)
     total = len(results)
     print(f"{total} test(s): {counts['PASS']} passed, "
           f"{counts['FAIL']} failed, {counts['ERROR']} error(s)")
