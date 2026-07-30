@@ -1,7 +1,7 @@
 # Test definition YAML for corev-dv test generator
 
 # corev-dv generator test
-name: corev_rand_interrupt
+name: corev_rand_debug
 uvm_test: $(CV_CORE_LC)_instr_base_test
 description: >
     RISCV-DV generated random debug tests

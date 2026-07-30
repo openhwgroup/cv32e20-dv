@@ -86,6 +86,7 @@ VLOG_LDGEN_FLAGS ?= \
                     -suppress 13288 \
                     -suppress 2181 \
                     -suppress 13262 \
+                    -suppress 2697 \
                     -timescale "1ns/1ps" \
                     -sv \
                     -mfcu \
@@ -96,6 +97,7 @@ VOPT_LDGEN_FLAGS ?= \
                     -debugdb \
                     -fsmdebug \
                     -suppress 7034 \
+                    -suppress 2697 \
                     +acc \
                     $(QUIET)
 
@@ -116,6 +118,7 @@ VLOG_FLAGS	?= \
 		-suppress 13071 \
 		-suppress 13401 \
 		-suppress vlog-2745 \
+		-suppress 2697 \
 		-timescale "1ns/1ps" \
 		-sv \
 		-64 \
@@ -156,6 +159,7 @@ VOPT_FLAGS    ?= \
                  -debugdb \
                  -fsmdebug \
                  -suppress 7034 \
+                 -suppress 2697 \
                  +acc \
                  $(QUIET)
 
@@ -377,7 +381,7 @@ vopt_corev-dv:
 			-o $(CV_CORE_LC)_instr_gen_tb_top_vopt \
 			-l vopt.log
 
-gen_corev-dv: $(LIBS)
+gen_corev-dv: $(LIBS) rvvi_stub $(SVLIB_PKG)
 	mkdir -p $(SIM_COREVDV_RESULTS)/$(TEST)
 	for (( idx=${GEN_START_INDEX}; idx < $$((${GEN_START_INDEX} + ${GEN_NUM_TESTS})); idx++ )); do \
 		mkdir -p $(SIM_TEST_RESULTS)/$$idx/test_program; \
@@ -403,7 +407,7 @@ gen_corev-dv: $(LIBS)
 		cp ${SIM_COREVDV_RESULTS}/${TEST}/${TEST}_$$idx.S ${SIM_TEST_RESULTS}/$$idx/test_program; \
 	done
 
-comp_corev-dv: $(RISCVDV_PKG) $(CV_CORE_PKG) vlog_corev-dv vopt_corev-dv
+comp_corev-dv: $(RISCVDV_PKG) $(CV_CORE_PKG) $(CV_VERIF_PKG) vlog_corev-dv vopt_corev-dv
 
 corev-dv: clean_riscv-dv clone_riscv-dv comp_corev-dv
 
