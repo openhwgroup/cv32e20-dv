@@ -11,7 +11,7 @@ Both the "core" and "uvmt" testbenches implements "virtual peripherals" that all
 - core: `tb/core/mm_ram.sv`
 - UVM: `env/uvme/.../uvme_cv32e20_vp_status_flags_seq.sv`
 
-Test passed is signaled by writting `123456789` (0x075B_CD15) is written to 0x20000000.
+Test passed is signaled by writting `123456789` (0x075B_CD15) to 0x20000000.
 Note that the symbol `tohost` is not supported.
 In the UVM environment, *any other value written there is a FAILURE* (`uvm_error`).
 The "core" testbench will FAIL the test when 0x1 is written.
@@ -32,25 +32,25 @@ The table below summarizes the status of the test-programs in the "tests/program
 Note that these test-programs are called "custom" because they are (mostly) all manually generated,
 typically, but not always, for a specific purpose.
 
-| Test dir                     | Type      | Description                                | Notes                                                     |
-|------------------------------|-----------|--------------------------------------------|-----------------------------------------------------------|
-| branch_zero                  | C / Assm  | branch with zero offset                    | Written to fill specific functional coverage hole         |
-| fibonacci                    | C         | calculates fibonacci sequence              | Classic programming example - kept for historical reasons |
-| coremark                     | C         | Benchmark to measure CPU/MCU performance   | Not needed for coverage closure                           |
-| dhrystone                    | C         | Somewhat dated benchmark                   | Not needed for coverage closure                           |
-| all_csr_por                  | Assembly  | Reads Power-on-Reset value of all 4K CSRs  | Most CSRs are not implemented, reads return 0x0           |
-| csr_instructions             | Assembly  | Execute all CSR access instructions        | Written to fill specific functional coverage hole         |
-| riscv_csr                    | Assembly  | script generated CSR access mode test      | script from riscv-dv                                      |
-| hpmcounter_basic_test        | C / Assm  | Exercise HPM counter CSRs                  |                                                           |
-| debug_test                   | C / Assm  | Exercise all debug features                | Self checking |
-| debug_test_boot_set          | C / Assm  |                                            | **PARKED** |
-| debug_test_known_miscompares | C / Assm  |                                            | **PARKED** |
-| debug_test_reset             | C / Assm  |                                            | **PARKED** | 
-| debug_test_trigger           | C / Assm  |                                            | **PARKED** |
-| illegal                      | Assembly  | Exercise detection of illegal instructions | |
-| misalign                     | C         | Exercise CV32E20 LSU misaligned access     | |
-| interrupt_test               | C / Assm  | | |
-| interrupt_bootstrap          | C / Assm  | | |
+| Test dir                     | Type     | Description                                | Notes                                                     |
+|------------------------------|----------|--------------------------------------------|-----------------------------------------------------------|
+| branch_zero                  | C / ASM  | branch with zero offset                    | Written to fill specific functional coverage hole         |
+| fibonacci                    | C        | calculates fibonacci sequence              | Classic programming example - kept for historical reasons |
+| coremark                     | C        | Benchmark to measure CPU/MCU performance   | Not needed for coverage closure                           |
+| dhrystone                    | C        | Somewhat dated benchmark                   | Not needed for coverage closure                           |
+| all_csr_por                  | ASM      | Reads Power-on-Reset value of all 4K CSRs  | Most CSRs are not implemented, reads return 0x0           |
+| csr_instructions             | ASM      | Execute all CSR access instructions        | Written to fill specific functional coverage hole         |
+| riscv_csr                    | ASM      | script generated CSR access mode test      | script from riscv-dv                                      |
+| hpmcounter_basic_test        | C / ASM  | Exercise HPM counter CSRs                  |                                                           |
+| debug_test                   | C / ASM  | Exercise all debug features                | Self checking |
+| debug_test_boot_set          | C / ASM  |                                            | **PARKED** |
+| debug_test_known_miscompares | C / ASM  |                                            | **PARKED** |
+| debug_test_reset             | C / ASM  |                                            | **PARKED** | 
+| debug_test_trigger           | C / ASM  |                                            | **PARKED** |
+| illegal                      | ASM      | Exercise detection of illegal instructions | |
+| misalign                     | C        | Exercise CV32E20 LSU misaligned access     | |
+| interrupt_test               | C / ASM  | | |
+| interrupt_bootstrap          | C / ASM  | | |
 
 ## "COREV-DV" Test-programs
 
