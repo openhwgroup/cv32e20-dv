@@ -1,0 +1,95 @@
+name: Certify
+
+# Verilates the cv32e20 testbench against pre-generated ACT4 ELFs and
+# enforces FAIL=0 in the certification summary. Reusable from cve2's
+# trigger workflow via `workflow_call`; also runs on cv32e20-dv PRs
+# that touch DUT-side code, and on pushes to main.
+
+on:
+  workflow_call:
+    inputs:
+      cv32e20_sha:
+        type: string
+        required: true
+        description: cv32e20 (cve2) commit SHA to test
+  pull_request:
+    paths:
+      - 'tb/**'
+      - 'mk/**'
+      - 'bsp/**'
+      - 'sim/**'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: certify-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+env:
+  RISCV_TOOLCHAIN_VERSION: '2026.04.26'
+  VERILATOR_VERSION: 'v5.042'
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin cv32e20 RTL to input SHA
+        if: inputs.cv32e20_sha != ''
+        run: |
+          sed -i "s/^CV_CORE_HASH .*/CV_CORE_HASH ?= ${{ inputs.cv32e20_sha }}/" sim/ExternalRepos.mk
+
+      - name: Cache RISC-V GCC
+        uses: actions/cache@v4
+        with:
+          path: ~/tools/riscv
+          key: riscv-gcc-${{ env.RISCV_TOOLCHAIN_VERSION }}-${{ runner.os }}
+
+      - name: Install RISC-V GCC
+        run: .github/scripts/install-riscv-gcc.sh
+
+      - name: Cache Verilator
+        uses: actions/cache@v4
+        with:
+          path: ~/tools/verilator-${{ env.VERILATOR_VERSION }}
+          key: verilator-${{ env.VERILATOR_VERSION }}-${{ runner.os }}
+
+      - name: Install Verilator
+        run: .github/scripts/install-verilator.sh
+
+      - name: Restore ELF bundle from Actions cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: vendor_lib/riscv-arch-test/act4/work/cv32e20/elfs
+          key: act4-elfs-cv32e20-${{ hashFiles('sim/.act4-elfs-pin') }}
+
+      - name: Download bundle if cache missed
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: make -C sim/core download-prebuilt-elfs
+
+      - name: Run certify
+        run: make -C sim/core certify-prebuilt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: certify-logs-${{ github.run_id }}
+          path: |
+            sim/core/simulation_results/certification/**/*.log
+            sim/core/simulation_results/certification/**/certification_summary.txt
+
+      - name: Enforce FAIL=0
+        run: |
+          SUMMARY=$(find sim/core/simulation_results/certification \
+              -name certification_summary.txt -print -quit)
+          [ -n "$SUMMARY" ] || { echo "certification_summary.txt not found"; exit 1; }
+          echo "Summary: $SUMMARY"
+          grep -q "FAIL=0" "$SUMMARY"

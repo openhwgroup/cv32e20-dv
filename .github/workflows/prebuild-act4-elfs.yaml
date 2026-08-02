@@ -1,0 +1,103 @@
+name: Prebuild ACT4 ELFs
+
+# Generates the ACT4 ELF bundle once per (fingerprint of inputs) and
+# publishes it as a GitHub Release tagged elfs-<fp>. The PR-side
+# certify workflow downloads this release instead of regenerating.
+#
+# Idempotent: if a release for the current fingerprint already exists,
+# the slow `make gen` step is skipped.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'sim/ExternalRepos.mk'
+      - 'sim/core/Makefile'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prebuild-act4-elfs
+  cancel-in-progress: false
+
+env:
+  RISCV_TOOLCHAIN_VERSION: '2026.04.26'
+  SAIL_VERSION: '0.10'
+
+jobs:
+  prebuild:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache RISC-V GCC
+        uses: actions/cache@v4
+        with:
+          path: ~/tools/riscv
+          key: riscv-gcc-${{ env.RISCV_TOOLCHAIN_VERSION }}-${{ runner.os }}
+
+      - name: Install RISC-V GCC
+        run: .github/scripts/install-riscv-gcc.sh
+
+      - name: Cache Sail
+        uses: actions/cache@v4
+        with:
+          path: ~/tools/sail
+          key: sail-${{ env.SAIL_VERSION }}-${{ runner.os }}
+
+      - name: Install Sail
+        run: .github/scripts/install-sail.sh
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Compute fingerprint
+        id: fp
+        run: |
+          FP=$(make -C sim/core elfs-fingerprint -s)
+          echo "fp=$FP" >> "$GITHUB_OUTPUT"
+          echo "Fingerprint: $FP"
+
+      - name: Check if release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="elfs-${{ steps.fp.outputs.fp }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists; skipping gen."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG does not exist; will generate."
+          fi
+
+      - name: Clone ACT4
+        if: steps.check.outputs.exists == 'false'
+        run: make -C sim/core clone_act4
+
+      - name: Run make gen
+        if: steps.check.outputs.exists == 'false'
+        run: make -C sim/core gen
+
+      - name: Package ELFs
+        if: steps.check.outputs.exists == 'false'
+        run: make -C sim/core elfs-package
+
+      - name: Publish GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FP="${{ steps.fp.outputs.fp }}"
+          TAG="elfs-$FP"
+          BUNDLE="dist/act4-elfs-cv32e20-$FP.tar.gz"
+          MANIFEST="$BUNDLE.manifest.json"
+          gh release create "$TAG" "$BUNDLE" "$MANIFEST" \
+            --title "ACT4 ELFs $FP" \
+            --notes "Prebuilt ACT4 ELFs for cv32e20. Fingerprint: $FP"
