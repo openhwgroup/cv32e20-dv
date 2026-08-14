@@ -285,7 +285,7 @@ task uvme_cv32e20_interrupt_noise_c::body();
         finish_item(irq_req);
 
         foreach (irq_req.irq_mask[i]) begin
-          if (irq_req.irq_mask[i]) begin
+          if (irq_req.irq_mask[i] && !outstanding_until_ack[i]) begin
             outstanding_until_ack[i]       = 1;
             outstanding_until_ack_since[i] = $time;
           end

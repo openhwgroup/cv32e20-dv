@@ -57,8 +57,7 @@ DPI_INCLUDE            ?= $(QUESTASIM_HOME)/include
 
 # Default flags
 VSIM_USER_FLAGS        ?=
-VOPT_COV               ?= +cover=$(COV_TYPES)+$(COV_INSTANCE).
-#VOPT_COV               ?= +cover=$(COV_TYPES)
+VOPT_COV               ?= +cover=$(COV_TYPES)$(if $(COV_INSTANCE),+$(COV_INSTANCE))
 VSIM_COV               ?= -coverage
 VOPT_WAVES_ADV_DEBUG   ?= -designfile design.bin
 VSIM_WAVES_ADV_DEBUG   ?= -qwavedb=+signal+assertion+ignoretxntime+msgmode=both
@@ -77,7 +76,6 @@ ifeq ($(USES_DPI),1)
 	OS = $(shell uname -s | tr A-Z a-z)
  	ARCH = $(shell uname -m)
 	DPILIB_VSIM_OPT = -sv_lib $(QUESTASIM_HOME)/uvm-1.2/$(OS)_$(ARCH)/uvm_dpi
-	DPILIB_TARGET = dpi_lib$(BITS)
 	DPILIB_TARGET = dpi_lib$(BITS)
 else
 	DPILIB_VLOG_OPT = +define+UVM_NO_DPI
@@ -647,7 +645,7 @@ cov_holes_details: $(COV_MERGE_TARGET)
 			$(COV_UCDB)
 
 # Target to extract TRL5 coverage metrics
-trl5_coverage_metrics:
+trl5_coverage_metrics: $(VSIM_COV_MERGE_DIR)/merged.ucdb
 	$(MKDIR_P) $(VSIM_COV_MERGE_DIR)
 	cd $(VSIM_COV_MERGE_DIR) && \
 		COV_INSTANCE="$(COV_INSTANCE)" $(VCOVER) \
