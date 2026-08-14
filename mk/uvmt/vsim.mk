@@ -57,7 +57,7 @@ DPI_INCLUDE            ?= $(QUESTASIM_HOME)/include
 
 # Default flags
 VSIM_USER_FLAGS        ?=
-VOPT_COV               ?= +cover=$(COV_TYPES)$(if $(COV_INSTANCE),+$(COV_INSTANCE))
+VOPT_COV               ?= +cover=$(COV_TYPES)$(if $(COV_INSTANCE),+$(COV_INSTANCE).)
 VSIM_COV               ?= -coverage
 VOPT_WAVES_ADV_DEBUG   ?= -designfile design.bin
 VSIM_WAVES_ADV_DEBUG   ?= -qwavedb=+signal+assertion+ignoretxntime+msgmode=both
@@ -505,10 +505,21 @@ gen_ovpsim_ic:
 export IMPERAS_TOOLS=$(SIM_RUN_RESULTS)/ovpsim.ic
 
 # Target to create work directory in $(VSIM_RESULTS)/
+#
+# Always wipe and recreate rather than conditionally preserving an existing
+# library: re-running `vopt -o $(RTLSRC_VOPT_TB_TOP)` against a work library
+# that already holds an optimized snapshot from a prior `make comp` (e.g. a
+# second/third regression run reusing the same results directory) has been
+# observed to silently produce an incomplete design -- vopt exits 0 but skips
+# real elaboration (no FSM recognition messages, no +cover instrumentation
+# actually applied) with no error anywhere in the chain. `vlog` below already
+# unconditionally recompiles every source file on every `make comp` regardless
+# of whether the library is fresh, so this costs no real incremental-compile
+# time -- it just removes the possibility of a stale optimized snapshot
+# colliding with a fresh one.
 lib: mk_vsim_dir  $(CV_CORE_PKG) $(CV_VERIF_PKG) rvvi_stub $(SVLIB_PKG) $(TBSRC_PKG) $(TBSRC)
-	if [ ! -d "$(SIM_CFG_RESULTS)/$(VWORK)" ]; then \
-		$(VLIB) $(SIM_CFG_RESULTS)/$(VWORK); \
-	fi
+	rm -rf $(SIM_CFG_RESULTS)/$(VWORK)
+	$(VLIB) $(SIM_CFG_RESULTS)/$(VWORK)
 
 # Target to run vlog over SystemVerilog source in $(VSIM_RESULTS)/
 vlog: $(LIBS) lib
