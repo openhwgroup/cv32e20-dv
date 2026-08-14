@@ -837,7 +837,8 @@ rvvi_stub:
 	@echo "$(BANNER)"
 	@echo "Building $(RVVI_STUB)"
 	@echo "$(BANNER)"
-	$(RVVI_STUB_CXX) $(RVVI_STUB_CFLAGS) $(RVVI_STUB_SRC) -I$(DPI_INCLUDE) -o $(RVVI_STUB_LIB)
+	$(RVVI_STUB_CXX) $(RVVI_STUB_CFLAGS) $(RVVI_STUB_SRC) -I$(DPI_INCLUDE) -o $(RVVI_STUB_LIB).$$$$.tmp && \
+	mv -f $(RVVI_STUB_LIB).$$$$.tmp $(RVVI_STUB_LIB)
 
 #endend
 
