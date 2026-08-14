@@ -6282,6 +6282,167 @@ test_done:
     sw a1,0(a0)
     sw a1,0(a0)
 
+# Coverage-closing block, added 2026-08-12: exercise legal but previously
+# untested CSR reads/writes in cve2_cs_registers.sv's read/write case
+# statements (MCONFIGPTR/MSTATUSH/MENVCFG(H)/MCOUNTEREN/SECURESEED reads;
+# unimplemented-but-architecturally-legal HPM counters/events 13-31
+# (MHPMCounterNum=10, read-as-zero/write-inert for indices >=10); the
+# 64-bit HPM counters' upper-word CSRs (*H, both implemented 3-12 and
+# unimplemented 13-31); MTVAL and direct HPM-counter writes). None of
+# these are illegal_csr -- all reach their case item and (for reads)
+# return a real or constant-zero value; see docs/RTL-STATEMENT-COVERAGE-AUDIT.md.
+csr_coverage_closing:
+    # Reads (csrrs x5,<csr>,x0 -- rs1=x0 so no side effect, real read into x5)
+    csrrs x5, 0x323, x0    # mhpmevent3
+    csrrs x5, 0x324, x0    # mhpmevent4
+    csrrs x5, 0x325, x0    # mhpmevent5
+    csrrs x5, 0x326, x0    # mhpmevent6
+    csrrs x5, 0x327, x0    # mhpmevent7
+    csrrs x5, 0x328, x0    # mhpmevent8
+    csrrs x5, 0x329, x0    # mhpmevent9
+    csrrs x5, 0x32A, x0    # mhpmevent10
+    csrrs x5, 0x32B, x0    # mhpmevent11
+    csrrs x5, 0x32C, x0    # mhpmevent12
+    csrrs x5, 0xF15, x0    # mconfigptr
+    csrrs x5, 0x310, x0    # mstatush
+    csrrs x5, 0x30A, x0    # menvcfg
+    csrrs x5, 0x31A, x0    # menvcfgh
+    csrrs x5, 0x306, x0    # mcounteren
+    csrrs x5, 0x7C1, x0    # secureseed
+    csrrs x5, 0x32D, x0    # mhpmevent13
+    csrrs x5, 0x32E, x0    # mhpmevent14
+    csrrs x5, 0x32F, x0    # mhpmevent15
+    csrrs x5, 0x330, x0    # mhpmevent16
+    csrrs x5, 0x331, x0    # mhpmevent17
+    csrrs x5, 0x332, x0    # mhpmevent18
+    csrrs x5, 0x333, x0    # mhpmevent19
+    csrrs x5, 0x334, x0    # mhpmevent20
+    csrrs x5, 0x335, x0    # mhpmevent21
+    csrrs x5, 0x336, x0    # mhpmevent22
+    csrrs x5, 0x337, x0    # mhpmevent23
+    csrrs x5, 0x338, x0    # mhpmevent24
+    csrrs x5, 0x339, x0    # mhpmevent25
+    csrrs x5, 0x33A, x0    # mhpmevent26
+    csrrs x5, 0x33B, x0    # mhpmevent27
+    csrrs x5, 0x33C, x0    # mhpmevent28
+    csrrs x5, 0x33D, x0    # mhpmevent29
+    csrrs x5, 0x33E, x0    # mhpmevent30
+    csrrs x5, 0x33F, x0    # mhpmevent31
+    csrrs x5, 0xB0D, x0    # mhpmcounter13
+    csrrs x5, 0xB0E, x0    # mhpmcounter14
+    csrrs x5, 0xB0F, x0    # mhpmcounter15
+    csrrs x5, 0xB10, x0    # mhpmcounter16
+    csrrs x5, 0xB11, x0    # mhpmcounter17
+    csrrs x5, 0xB12, x0    # mhpmcounter18
+    csrrs x5, 0xB13, x0    # mhpmcounter19
+    csrrs x5, 0xB14, x0    # mhpmcounter20
+    csrrs x5, 0xB15, x0    # mhpmcounter21
+    csrrs x5, 0xB16, x0    # mhpmcounter22
+    csrrs x5, 0xB17, x0    # mhpmcounter23
+    csrrs x5, 0xB18, x0    # mhpmcounter24
+    csrrs x5, 0xB19, x0    # mhpmcounter25
+    csrrs x5, 0xB1A, x0    # mhpmcounter26
+    csrrs x5, 0xB1B, x0    # mhpmcounter27
+    csrrs x5, 0xB1C, x0    # mhpmcounter28
+    csrrs x5, 0xB1D, x0    # mhpmcounter29
+    csrrs x5, 0xB1E, x0    # mhpmcounter30
+    csrrs x5, 0xB1F, x0    # mhpmcounter31
+    csrrs x5, 0xB80, x0    # mcycleh
+    csrrs x5, 0xB82, x0    # minstreth
+    csrrs x5, 0xB83, x0    # mhpmcounter3h
+    csrrs x5, 0xB84, x0    # mhpmcounter4h
+    csrrs x5, 0xB85, x0    # mhpmcounter5h
+    csrrs x5, 0xB86, x0    # mhpmcounter6h
+    csrrs x5, 0xB87, x0    # mhpmcounter7h
+    csrrs x5, 0xB88, x0    # mhpmcounter8h
+    csrrs x5, 0xB89, x0    # mhpmcounter9h
+    csrrs x5, 0xB8A, x0    # mhpmcounter10h
+    csrrs x5, 0xB8B, x0    # mhpmcounter11h
+    csrrs x5, 0xB8C, x0    # mhpmcounter12h
+    csrrs x5, 0xB8D, x0    # mhpmcounter13h
+    csrrs x5, 0xB8E, x0    # mhpmcounter14h
+    csrrs x5, 0xB8F, x0    # mhpmcounter15h
+    csrrs x5, 0xB90, x0    # mhpmcounter16h
+    csrrs x5, 0xB91, x0    # mhpmcounter17h
+    csrrs x5, 0xB92, x0    # mhpmcounter18h
+    csrrs x5, 0xB93, x0    # mhpmcounter19h
+    csrrs x5, 0xB94, x0    # mhpmcounter20h
+    csrrs x5, 0xB95, x0    # mhpmcounter21h
+    csrrs x5, 0xB96, x0    # mhpmcounter22h
+    csrrs x5, 0xB97, x0    # mhpmcounter23h
+    csrrs x5, 0xB98, x0    # mhpmcounter24h
+    csrrs x5, 0xB99, x0    # mhpmcounter25h
+    csrrs x5, 0xB9A, x0    # mhpmcounter26h
+    csrrs x5, 0xB9B, x0    # mhpmcounter27h
+    csrrs x5, 0xB9C, x0    # mhpmcounter28h
+    csrrs x5, 0xB9D, x0    # mhpmcounter29h
+    csrrs x5, 0xB9E, x0    # mhpmcounter30h
+    csrrs x5, 0xB9F, x0    # mhpmcounter31h
+    # Writes (csrrw x0,<csr>,x0 -- op=WRITE regardless of rs1, writes 0, discards read)
+    csrrw x0, 0x343, x0    # mtval
+    csrrw x0, 0xB00, x0    # mcycle
+    csrrw x0, 0xB02, x0    # minstret
+    csrrw x0, 0xB03, x0    # mhpmcounter3
+    csrrw x0, 0xB04, x0    # mhpmcounter4
+    csrrw x0, 0xB05, x0    # mhpmcounter5
+    csrrw x0, 0xB06, x0    # mhpmcounter6
+    csrrw x0, 0xB07, x0    # mhpmcounter7
+    csrrw x0, 0xB08, x0    # mhpmcounter8
+    csrrw x0, 0xB09, x0    # mhpmcounter9
+    csrrw x0, 0xB0A, x0    # mhpmcounter10
+    csrrw x0, 0xB0B, x0    # mhpmcounter11
+    csrrw x0, 0xB0C, x0    # mhpmcounter12
+    csrrw x0, 0xB0D, x0    # mhpmcounter13
+    csrrw x0, 0xB0E, x0    # mhpmcounter14
+    csrrw x0, 0xB0F, x0    # mhpmcounter15
+    csrrw x0, 0xB10, x0    # mhpmcounter16
+    csrrw x0, 0xB11, x0    # mhpmcounter17
+    csrrw x0, 0xB12, x0    # mhpmcounter18
+    csrrw x0, 0xB13, x0    # mhpmcounter19
+    csrrw x0, 0xB14, x0    # mhpmcounter20
+    csrrw x0, 0xB15, x0    # mhpmcounter21
+    csrrw x0, 0xB16, x0    # mhpmcounter22
+    csrrw x0, 0xB17, x0    # mhpmcounter23
+    csrrw x0, 0xB18, x0    # mhpmcounter24
+    csrrw x0, 0xB19, x0    # mhpmcounter25
+    csrrw x0, 0xB1A, x0    # mhpmcounter26
+    csrrw x0, 0xB1B, x0    # mhpmcounter27
+    csrrw x0, 0xB1C, x0    # mhpmcounter28
+    csrrw x0, 0xB1D, x0    # mhpmcounter29
+    csrrw x0, 0xB1E, x0    # mhpmcounter30
+    csrrw x0, 0xB1F, x0    # mhpmcounter31
+    csrrw x0, 0xB80, x0    # mcycleh
+    csrrw x0, 0xB82, x0    # minstreth
+    csrrw x0, 0xB83, x0    # mhpmcounter3h
+    csrrw x0, 0xB84, x0    # mhpmcounter4h
+    csrrw x0, 0xB85, x0    # mhpmcounter5h
+    csrrw x0, 0xB86, x0    # mhpmcounter6h
+    csrrw x0, 0xB87, x0    # mhpmcounter7h
+    csrrw x0, 0xB88, x0    # mhpmcounter8h
+    csrrw x0, 0xB89, x0    # mhpmcounter9h
+    csrrw x0, 0xB8A, x0    # mhpmcounter10h
+    csrrw x0, 0xB8B, x0    # mhpmcounter11h
+    csrrw x0, 0xB8C, x0    # mhpmcounter12h
+    csrrw x0, 0xB8D, x0    # mhpmcounter13h
+    csrrw x0, 0xB8E, x0    # mhpmcounter14h
+    csrrw x0, 0xB8F, x0    # mhpmcounter15h
+    csrrw x0, 0xB90, x0    # mhpmcounter16h
+    csrrw x0, 0xB91, x0    # mhpmcounter17h
+    csrrw x0, 0xB92, x0    # mhpmcounter18h
+    csrrw x0, 0xB93, x0    # mhpmcounter19h
+    csrrw x0, 0xB94, x0    # mhpmcounter20h
+    csrrw x0, 0xB95, x0    # mhpmcounter21h
+    csrrw x0, 0xB96, x0    # mhpmcounter22h
+    csrrw x0, 0xB97, x0    # mhpmcounter23h
+    csrrw x0, 0xB98, x0    # mhpmcounter24h
+    csrrw x0, 0xB99, x0    # mhpmcounter25h
+    csrrw x0, 0xB9A, x0    # mhpmcounter26h
+    csrrw x0, 0xB9B, x0    # mhpmcounter27h
+    csrrw x0, 0xB9C, x0    # mhpmcounter28h
+    csrrw x0, 0xB9D, x0    # mhpmcounter29h
+    csrrw x0, 0xB9E, x0    # mhpmcounter30h
+    csrrw x0, 0xB9F, x0    # mhpmcounter31h
+
 # extraneous, manually added, store (write) and load (read)
 extra_store_load:
     li  x18, 0x12345678

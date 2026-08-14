@@ -534,7 +534,7 @@ ifeq ($(TEST_FIXED_ELF),1)
 	cp $(TEST_TEST_DIR)/$(TEST).elf $@
 else
 ifeq ($(TEST_ACT),1)
-%.elf: $(TEST_FILES)
+%.elf: $(TEST_FILES) $(wildcard $(BSP)/*.S $(BSP)/*.c $(BSP)/*.h $(BSP)/link.ld)
 	mkdir -p $(SIM_TEST_PROGRAM_RESULTS)
 	make bsp ACT=1
 	@echo "$(BANNER)"
@@ -556,7 +556,7 @@ ifeq ($(TEST_ACT),1)
 #		-lcv-verif
 
 else
-%.elf: $(TEST_FILES)
+%.elf: $(TEST_FILES) $(wildcard $(BSP)/*.S $(BSP)/*.c $(BSP)/*.h $(BSP)/link.ld)
 	mkdir -p $(SIM_TEST_PROGRAM_RESULTS)
 	make bsp
 	@echo "$(BANNER)"

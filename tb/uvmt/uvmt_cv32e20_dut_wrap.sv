@@ -184,7 +184,7 @@ module uvmt_cv32e20_dut_wrap #(
          .irq_timer_i            ( irq_uvma[7]                    ),
          .irq_external_i         ( irq_uvma[11]                   ),
          .irq_fast_i             ( irq_uvma[31:16]                ),
-         .irq_nm_i               ( 1'b0 /*irq_uvma[0]*/           ), // TODO: non-maskeable interrupt
+         .irq_nm_i               ( irq_uvma[0]                    ), // non-maskable interrupt
 
   // Debug Interface
          .debug_req_i             ( debug_req_uvma ),

@@ -20,10 +20,6 @@
 `ifndef __UVMT_CV32E20_IMPERAS_DV_WRAP_SV__
 `define __UVMT_CV32E20_IMPERAS_DV_WRAP_SV__
 
-`define DUT_PATH dut_wrap.cv32e20_top_i
-`define RVFI_IF  `DUT_PATH
-`define DUT_CORE_PATH dut_wrap.cv32e20_top_i.u_cve2_top.u_cve2_core
-
 `define STRINGIFY(x) `"x`"
 
 ////////////////////////////////////////////////////////////////////////////
@@ -99,6 +95,10 @@ module uvmt_cv32e20_imperas_dv_wrap
     (
         rvviTrace  rvvi // RVVI SystemVerilog Interface
     );
+
+`define DUT_PATH dut_wrap.cv32e20_top_i
+`define RVFI_IF  `DUT_PATH
+`define DUT_CORE_PATH dut_wrap.cv32e20_top_i.u_cve2_top.u_cve2_core
 
     trace2log       idv_trace2log(rvvi);
 

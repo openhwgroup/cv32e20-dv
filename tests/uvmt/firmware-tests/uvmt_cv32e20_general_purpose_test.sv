@@ -66,6 +66,12 @@ class uvmt_cv32e20_general_purpose_test_c extends uvmt_cv32e20_base_test_c;
    extern virtual task irq_noise();
 
    /**
+    *  Deterministically assert NMI (irq_mask[0]) once, after a bounded
+    *  random delay. See uvme_cv32e20_nmi_assert_vseq.sv.
+    */
+   extern virtual task nmi_assert();
+
+   /**
     *  Randomly assert/deassert fetch_enable_i
     */
    extern virtual task random_fetch_toggle();
@@ -99,6 +105,12 @@ task uvmt_cv32e20_general_purpose_test_c::run_phase(uvm_phase phase);
    if ($test$plusargs("gen_irq_noise")) begin
     fork
       irq_noise();
+    join_none
+   end
+
+   if ($test$plusargs("nmi_assert")) begin
+    fork
+      nmi_assert();
     join_none
    end
 
@@ -210,6 +222,16 @@ task uvmt_cv32e20_general_purpose_test_c::irq_noise();
     break;
   end
 endtask : irq_noise
+
+task uvmt_cv32e20_general_purpose_test_c::nmi_assert();
+  uvme_cv32e20_nmi_assert_c nmi_assert_vseq;
+
+  `uvm_info("TEST", "Starting NMI Assert thread in UVM test", UVM_NONE);
+
+  nmi_assert_vseq = uvme_cv32e20_nmi_assert_c::type_id::create("nmi_assert_vseqr", vsequencer);
+  assert(nmi_assert_vseq.randomize());
+  nmi_assert_vseq.start(vsequencer);
+endtask : nmi_assert
 
 task uvmt_cv32e20_general_purpose_test_c::random_fetch_toggle();
   `uvm_info("TEST", "Starting random_fetch_toggle thread in UVM test", UVM_NONE);

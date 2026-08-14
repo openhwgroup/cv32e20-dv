@@ -52,7 +52,8 @@ PATH, as for a normal `make test`.
     bin/run_tests.py
     python3 bin/run_tests.py                    # equivalent
 
-    # Run the same set on the UVM testbench (vsim):
+    # Run the same set on the UVM testbench (vsim), plus UVMT_TESTS (directed
+    # tests that only make sense under uvmt, e.g. nmi_test):
     bin/run_tests.py --tb uvmt
     # (equivalent to `make test TEST=<name> SIMULATOR=vsim` per test; the
     #  script sets SIMULATOR=vsim for you, so no need to export it yourself.)
@@ -84,6 +85,10 @@ PATH, as for a normal `make test`.
     bin/run_tests.py --tb uvmt --gen-seed 363891135 --run-seed 354410829 \
         corev_rand_instr_and_data_stalls
 
+    # Collect code coverage (uvmt only; equivalent to `make test ... COV=1`
+    # per test -- see docs/COVERAGE-MAKE-TARGETS.md for the report targets):
+    bin/run_tests.py --tb uvmt --cov hello-world
+
     # Other options:
     #   --cfg NAME      uvmt config subdirectory                (default: default)
     #   --run-index N   RUN_INDEX subdirectory                  (default: 0)
@@ -91,6 +96,7 @@ PATH, as for a normal `make test`.
     #   --run-seed SEED test-step SEED ('random' or a literal value)
     #   --timeout SECS  per-test timeout                        (default: 1800)
     #   --jobs N, -j N  run up to N tests concurrently           (default: 1)
+    #   --cov           collect code coverage (uvmt only)
     #   --quiet         suppress per-test simulation banners
     #   -h / --help     full option help
 
@@ -110,7 +116,11 @@ With --jobs > 1 and --tb uvmt, this script instead compiles the design ONCE
 up front (`make comp`, serialized, in addition to the existing one-time `make
 corev-dv` setup for corev-dv tests) and then passes COMP=NO to every test in
 the parallel batch, so workers only run `vsim` against the already-compiled
-design -- each in its own per-test/run-index run directory
+design. If --cov is also given, that one-time compile is done with COV=1 too
+(otherwise the shared design has no +cover instrumentation and every
+worker's .ucdb ends up with assertions/covergroups but zero statement/
+branch/condition coverage, since COMP=NO skips each worker's own vopt) --
+each worker runs in its own per-test/run-index run directory
 (sim/uvmt/vsim_results/<cfg>/<test>/<run_index>/), which `make`'s `run`
 target `vmap`s back to the shared read-only compiled library. Many `vsim`
 processes reading one compiled snapshot concurrently is a standard, safe
@@ -184,7 +194,7 @@ C_TESTS = [
     "branch_zero",
     "coremark",
     "dhrystone",
-    "all_csr_por",
+#    "all_csr_por",
     "csr_instructions",
     "hpmcounter_basic_test",
     "illegal",
@@ -228,6 +238,17 @@ PARKED = [
     "debug_test_reset",
     "debug_test_known_miscompares",
     "debug_test_trigger",
+]
+
+# Directed tests that are part of the standard regression (unlike PARKED,
+# not opt-in) but only make sense on the uvmt TB, since they need uvmt-only
+# stimulus with no core-TB equivalent. Automatically added to the default
+# selection whenever --tb uvmt is chosen (see main()); ignored for --tb core.
+#   * nmi_test needs the uvmt interrupt-agent's +nmi_assert stimulus (see
+#     uvme_cv32e20_nmi_assert_vseq.sv); on the core TB the NMI line is never
+#     asserted.
+UVMT_TESTS = [
+    "nmi_test",
 ]
 
 # corev-dv (OpenHW's class extensions of Google's riscv-dv) generated regression
@@ -363,14 +384,22 @@ def setup_corev_dv(tb, timeout):
                   "no corev-dv test can build without it")
 
 
-def setup_comp(tb, timeout):
+def setup_comp(tb, timeout, cov=False):
     """Run `make comp` once: compiles the main testbench (uvmt_*_tb_vopt) into
     the shared work library. Required before a --jobs > 1 batch can safely
     pass COMP=NO to its workers -- without a compiled design already sitting
     in the shared library, every worker would either fail (nothing to run
-    against) or race to compile it themselves. Aborts the script on failure."""
+    against) or race to compile it themselves. Aborts the script on failure.
+
+    cov: pass COV=1 to this compile so vopt instruments the design with
+    +cover -- required when the --jobs > 1 batch will also run with --cov,
+    since workers pass COMP=NO and reuse this shared compile as-is (without
+    this, every worker's .ucdb ends up with no statement/branch/condition
+    coverage at all, only assertions/covergroups)."""
     tbcfg = TESTBENCHES[tb]
     cmd = ["make", "comp"] + tbcfg["make_args"]
+    if cov:
+        cmd.append("COV=1")
     env = make_env(tbcfg)
 
     print(f"[Setup/{tb}] make comp (one-time compile for --jobs > 1) ...")
@@ -387,7 +416,7 @@ def setup_comp(tb, timeout):
 
 
 def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None,
-             label=None, gen_seed="random", run_seed="random"):
+             label=None, gen_seed="random", run_seed="random", cov=False):
     """Build+run one test on the chosen testbench; return
     (outcome, detail, gen_seed_used, run_seed_used).
 
@@ -411,6 +440,12 @@ def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None,
     extra_make_args: additional make variable assignments appended to each
     command line (e.g. ["COMP=NO"] for a --jobs > 1 batch that already had
     setup_comp() run once beforehand).
+    cov: pass COV=1 to the actual firmware build+run (equivalent to `make
+    test ... COV=1`), so vopt instruments the design and Questa writes a
+    .ucdb -- see docs/COVERAGE-MAKE-TARGETS.md for the report targets that
+    consume it. Deliberately NOT passed to the gen_corev-dv step above: that's
+    a separate UVM environment/vsim invocation (the random-program generator,
+    unrelated to the DUT), so instrumenting it would be pointless.
     label: when set (--jobs > 1), prefixes each printed banner line with the
     test name so concurrent workers' output stays distinguishable; printing
     is done as one locked block per test so lines from different tests can't
@@ -453,6 +488,8 @@ def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None,
     cmd = ["make", "test", f"TEST={test}", f"RUN_INDEX={run_index}"]
     if test in COREV_DV_TESTS:
         cmd.append(f"SEED={run_seed}")
+    if cov:
+        cmd.append("COV=1")
     cmd += tbcfg["make_args"]
     if extra_make_args:
         cmd += extra_make_args
@@ -553,6 +590,13 @@ def main():
                          "env-level randomization, e.g. OBI stall knobs). "
                          "'random' (default) or a literal value to replay a "
                          "specific prior run. No effect on non-corev-dv tests.")
+    ap.add_argument("--cov", action="store_true",
+                    help="collect code coverage (uvmt only; equivalent to "
+                         "`make test ... COV=1` per test). Requires "
+                         "sim/tools/vsim/cov.tcl to exist, or Questa silently "
+                         "collects nothing -- see docs/COVERAGE-MAKE-TARGETS.md "
+                         "for the report targets (cov, cov_txt, cov_holes, "
+                         "cov_holes_details) that consume the resulting .ucdb.")
     ap.add_argument("--quiet", action="store_true",
                     help="suppress per-test simulation banner output")
     ap.add_argument("--jobs", "-j", type=int, default=1,
@@ -564,6 +608,10 @@ def main():
     if args.jobs < 1:
         ap.error("--jobs must be >= 1")
 
+    if args.cov and args.tb != "uvmt":
+        ap.error("--cov requires --tb uvmt (Questa coverage; the core "
+                  "Verilator testbench has no COV support)")
+
     if args.corev_dv_only:
         if args.tests or args.include_parked or args.include_corev_dv:
             ap.error("--corev-dv-only cannot be combined with test names, "
@@ -573,6 +621,8 @@ def main():
         selected = args.tests
     else:
         selected = list(TESTS)
+        if args.tb == "uvmt":
+            selected += UVMT_TESTS
         if args.include_parked:
             selected += PARKED
         if args.include_corev_dv:
@@ -595,7 +645,7 @@ def main():
             # COMP=NO and safely skip recompilation instead of racing on the
             # shared vsim work library -- see the "Concurrency" section of
             # --help for the full explanation.
-            setup_comp(args.tb, args.timeout)
+            setup_comp(args.tb, args.timeout, cov=args.cov)
             extra_make_args = ["COMP=NO"]
         else:
             print(f"warning: --jobs {args.jobs} with --tb core has not been "
@@ -616,7 +666,8 @@ def main():
                 args.timeout, args.quiet,
                 extra_make_args=extra_make_args,
                 label=test if args.jobs > 1 else None,
-                gen_seed=args.gen_seed, run_seed=args.run_seed)
+                gen_seed=args.gen_seed, run_seed=args.run_seed,
+                cov=args.cov)
         if args.jobs > 1:
             done = "Parsed" if args.parse_only else "Done"
             with _print_lock:

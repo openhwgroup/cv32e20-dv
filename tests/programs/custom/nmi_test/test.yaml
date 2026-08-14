@@ -1,0 +1,6 @@
+name: nmi_test
+uvm_test: uvmt_$(CV_CORE_LC)_firmware_test_c
+description: >
+    NMI (non-maskable interrupt) directed test
+plusargs: >
+    +nmi_assert

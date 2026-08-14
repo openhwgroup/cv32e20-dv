@@ -47697,6 +47697,66 @@ main:
 .word(0x04008033) # p.abs   [31:25]==000_0010, [14:12]==000, [6:0]==011_0011
     nop
 .word(0x040080B3) # p.abs   [31:25]==000_0010, [14:12]==000, [6:0]==011_0011
+.word(0x2870D093) # orc.b [31:27]==0_0101,[26]=0,[24:20]==0_0111 (rs2=7), RV32B=None on this core -> illegal
+.word(0x74701073) # csrrw x0,mseccfg,x0 -- PMPEnable=0 on this core, so mseccfg (0x747) is always illegal_csr
+.half(0x4002) # c.lwsp x0,0(sp) -- RESERVED (rd==0), cve2_compressed_decoder.sv:221. u_sw_irq_handler correctly detects compressed illegal instrs and advances mepc by 2, not 4.
+.half(0x8002) # c.jr x0 -- RESERVED (rd==0), cve2_compressed_decoder.sv:233. Same category as the c.lwsp entry above; only reached before via corev-dv's random illegal-instr seed, not deterministic.
+# PMP CSR reads (cve2_cs_registers.sv:361-384): PMPEnable=0 on this core, so
+# each of these is legal at the decoder/case-selection level (case items are
+# genuinely reachable, not gated) but illegal_csr gets forced true afterward
+# (cve2_cs_registers.sv:478-486) -- traps the same way as mseccfg above.
+.word(0x3A001073) # csrrw x0,pmpcfg0,x0
+.word(0x3A101073) # csrrw x0,pmpcfg1,x0
+.word(0x3A201073) # csrrw x0,pmpcfg2,x0
+.word(0x3A301073) # csrrw x0,pmpcfg3,x0
+.word(0x3B001073) # csrrw x0,pmpaddr0,x0
+.word(0x3B101073) # csrrw x0,pmpaddr1,x0
+.word(0x3B201073) # csrrw x0,pmpaddr2,x0
+.word(0x3B301073) # csrrw x0,pmpaddr3,x0
+.word(0x3B401073) # csrrw x0,pmpaddr4,x0
+.word(0x3B501073) # csrrw x0,pmpaddr5,x0
+.word(0x3B601073) # csrrw x0,pmpaddr6,x0
+.word(0x3B701073) # csrrw x0,pmpaddr7,x0
+.word(0x3B801073) # csrrw x0,pmpaddr8,x0
+.word(0x3B901073) # csrrw x0,pmpaddr9,x0
+.word(0x3BA01073) # csrrw x0,pmpaddr10,x0
+.word(0x3BB01073) # csrrw x0,pmpaddr11,x0
+.word(0x3BC01073) # csrrw x0,pmpaddr12,x0
+.word(0x3BD01073) # csrrw x0,pmpaddr13,x0
+.word(0x3BE01073) # csrrw x0,pmpaddr14,x0
+.word(0x3BF01073) # csrrw x0,pmpaddr15,x0
+.word(0x75701073) # csrrw x0,mseccfgh,x0 -- PMPEnable=0 on this core, so mseccfgh (0x757) is always illegal_csr
+# OP-IMM funct3=001, [31:27]=0_1100 sub-case (cve2_decoder.sv:381-397): case
+# entry itself is reachable (raw instr bits, no upstream gate), only the
+# body's RV32B!=RV32BNone ternary is gated -- same category as orc.b above.
+.word(0x60101013) # ctz      [26:20]=0000001
+.word(0x60201013) # cpop     [26:20]=0000010
+.word(0x60401013) # sext.b   [26:20]=0000100
+.word(0x60501013) # sext.h   [26:20]=0000101
+.word(0x61101013) # crc32.h  [26:20]=0010001
+.word(0x61201013) # crc32.w  [26:20]=0010010
+.word(0x61801013) # crc32c.b [26:20]=0011000
+.word(0x61901013) # crc32c.h [26:20]=0011001
+.word(0x61A01013) # crc32c.w [26:20]=0011010
+# cve2_compressed_decoder.sv:168-171: C1/MISC-ALU {instr[12],instr[6:5]}==100/101
+# (c.subw/c.addw) -- reserved on RV32 (RV64/RV128-only mnemonics), same
+# unconditional illegal_instr_o=1 body as the 110/111 case.
+.half(0x9C01) # c.subw slot [15:13]=100,[12]=1,[11:10]=11,[6:5]=00
+.half(0x9C21) # c.addw slot [15:13]=100,[12]=1,[11:10]=11,[6:5]=01
+# 2026-08-13: line 170 (110 slot) flipped to a miss on a fresh corev_rand_illegal_instr_test
+# seed (was previously hit only by random stimulus, never hand-built). Closed
+# deterministically the same way as the other slots in this group -- see
+# docs/RTL-STATEMENT-COVERAGE-AUDIT.md for the seed-variance history.
+.half(0x9C41) # reserved slot [15:13]=100,[12]=1,[11:10]=11,[6:5]=10
+# 2026-08-14: fresh-from-scratch regression exposed 3 more misses relying only on random
+# stimulus, never hand-built -- same seed-variance pattern as above:
+#   cve2_compressed_decoder.sv:171 -- the 111 sibling of the 100/101/110 group just above
+#   cve2_compressed_decoder.sv:121 -- C1 c.lui reserved when nzimm==0 ({instr[12],instr[6:2]}==0)
+#   cve2_compressed_decoder.sv:133 -- C1 c.srli/c.srai reserved when shamt[5](instr[12])==1 on RV32
+# See docs/RTL-STATEMENT-COVERAGE-AUDIT.md for the seed-variance history.
+.half(0x9C61) # reserved slot [15:13]=100,[12]=1,[11:10]=11,[6:5]=11
+.half(0x6081) # c.lui rd=x1, nzimm=0 -- RESERVED, cve2_compressed_decoder.sv:121
+.half(0x9005) # c.srli rd'=x8, shamt[5]=1 -- RESERVED on RV32, cve2_compressed_decoder.sv:133
 
     lw      x5,80(sp)
     bne     x5, x6, fail
@@ -47739,7 +47799,7 @@ main:
     lw      x5,4(sp)
     bne     x5, x25, fail
     addi    sp,sp,84
-    li x16, 47595      # this is the number of EXPECTED illegal instructions
+    li x16, 47635      # this is the number of EXPECTED illegal instructions
     beq x31, x16, test_end
 fail:
     TEST_FAIL          # mismatch: signal failure (write 1) and halt
@@ -47753,7 +47813,18 @@ u_sw_irq_handler:
     li x28, 2
     bne x30, x28, _exit
     csrrc x27, mepc, x0
-    c.addi x27, 4
+    # Advance mepc by 2 or 4 depending on whether the trapping instruction at
+    # mepc is compressed (bits[1:0] != 3) or not -- same detection the shared
+    # bsp/handlers.S u_sw_irq_handler uses. Needed once this file's .word
+    # (32-bit) list gained a .half (16-bit) entry; previously every entry was
+    # exactly 4 bytes so a fixed +4 was safe.
+    lb    x26, 0(x27)
+    andi  x26, x26, 0x3
+    li    x28, 0x3
+    bne   x26, x28, 1f
+    c.addi x27, 2
+1:
+    c.addi x27, 2
     csrrw x0, mepc, x27
     c.addi x31, 1
     mret
