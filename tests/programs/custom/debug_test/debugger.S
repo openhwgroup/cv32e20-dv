@@ -604,6 +604,18 @@ _debugger_end_continue:
     //lw t0, 0(a0)
     la a0, __debugger_stack_start
     csrr t0, 0x7b3
+    // Close csr_pipeline_flushes condition coverage (cve2_id_stage.sv:604):
+    // exercise the CLEAR-op form (csrrc, nonzero rs1 so it isn't reclassified
+    // to a plain read by cve2_decoder.sv:198-200) against dpc/dscratch1, the
+    // two debug CSRs no existing test issued a csrrc/csrrci against. Safe
+    // here specifically: dscratch1 has already been read out into the real
+    // t0 above (its CSR value is dead until the next debug entry's csrw
+    // overwrites it), and clearing dpc's bit 0 is a true no-op since dpc is
+    // always even (instruction alignment) -- t1 is about to be clobbered by
+    // the lw below regardless, so it's free to use as the clear mask.
+    li t1, 1
+    csrrc x0, dpc, t1
+    csrrc x0, dscratch1, t1
     lw   t1, 4(a0)
     lw   t2, 8(a0)
     lw   a1, 12(a0)

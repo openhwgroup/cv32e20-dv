@@ -73,6 +73,7 @@ package uvme_cv32e20_pkg;
    `include "uvme_cv32e20_base_vseq.sv"
    `include "uvme_cv32e20_reset_vseq.sv"
    `include "uvme_cv32e20_interrupt_noise_vseq.sv"
+   `include "uvme_cv32e20_nmi_assert_vseq.sv"
    `include "uvme_cv32e20_core_cntrl_base_seq.sv"
    `include "uvme_cv32e20_core_cntrl_fetch_vseq.sv"
    `include "uvme_cv32e20_vp_debug_control_seq.sv"

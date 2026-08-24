@@ -36,7 +36,14 @@ riscv_instr_name_t unsupported_instr[];
 riscv_instr_group_t supported_isa[$] = {RV32I, RV32M, RV32C};
 
 // Interrupt mode support
-mtvec_mode_t supported_interrupt_mode[$] = {DIRECT, VECTORED};
+// CV32E20's mtvec.MODE field is hardwired/read-only to 2'b01 (vectored) -
+// see the CV32E20 User Manual (cs_registers.rst: "MODE: Always set to
+// 2'b01 ... (read-only)"). DIRECT must not be offered here: if the
+// generator picks DIRECT, it emits a single flat mtvec_handler that
+// assumes every trap enters at its first instruction, but the hardware
+// still vectors interrupts to mtvec_base + 4*cause, landing mid-prologue
+// and corrupting the register-save context.
+mtvec_mode_t supported_interrupt_mode[$] = {VECTORED};
 
 // The number of interrupt vectors to be generated, only used if VECTORED interrupt mode is
 // supported
@@ -98,11 +105,7 @@ parameter int NUM_HARTS = 1;
 // ----------------------------------------------------------------------------
 
 // Implemented previlieged CSR list
-`ifdef DSIM
-privileged_reg_t implemented_csr[] = {
-`else
 const privileged_reg_t implemented_csr[] = {
-`endif
     // Machine mode mode CSR
     MVENDORID,  // Vendor ID
     MARCHID,    // Architecture ID
@@ -120,9 +123,7 @@ const privileged_reg_t implemented_csr[] = {
     MIP         // Machine interrupt pending
 };
 
-`ifdef DSIM
-  bit [11:0] custom_csr[] = {
-`elsif _VCP
+`ifdef _VCP
   bit [11:0] custom_csr[] = {
 `else
   const bit [11:0] custom_csr[] = {
@@ -133,21 +134,13 @@ const privileged_reg_t implemented_csr[] = {
 // Supported interrupt/exception setting, used for functional coverage
 // ----------------------------------------------------------------------------
 
-`ifdef DSIM
-interrupt_cause_t implemented_interrupt[] = {
-`else
 const interrupt_cause_t implemented_interrupt[] = {
-`endif
     M_SOFTWARE_INTR,
     M_TIMER_INTR,
     M_EXTERNAL_INTR
 };
 
-`ifdef DSIM
-exception_cause_t implemented_exception[] = {
-`else
 const exception_cause_t implemented_exception[] = {
-`endif
     INSTRUCTION_ACCESS_FAULT,
     ILLEGAL_INSTRUCTION,
     BREAKPOINT,

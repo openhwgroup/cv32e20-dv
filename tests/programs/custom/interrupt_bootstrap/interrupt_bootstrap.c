@@ -232,7 +232,17 @@ int test1() {
 // To share implementation of basic interrupt test with vector relocation tests,
 // break out the test 1 implementation here
 int test1_impl(int direct_mode) {
-    for (uint32_t i = 0; i < 32; i++) {
+    // i == 0 is irq_uvma[0] == NMI (uvmt_cv32e20_dut_wrap.sv irq_nm_i), not a
+    // maskable line -- it doesn't belong in IRQ_MASK/mie/mip the way i=1..31
+    // do, and this loop's "assert once, wait, clear at the end of the
+    // mie/gmie sub-iteration" model assumes a maskable interrupt that only
+    // fires once mie/gmie both permit it. NMI ignores mie/mstatus.MIE
+    // entirely and retriggers on every mret while the line is held, so it
+    // needs its own dedicated stimulus that deasserts promptly once acked
+    // (see uvme_cv32e20_nmi_assert_c) rather than a level held across this
+    // loop's full 20-iteration delay window -- covered separately by
+    // tests/programs/custom/nmi_test. Skip it here.
+    for (uint32_t i = 1; i < 32; i++) {
 #ifdef DEBUG_MSG
         printf("Test1 -> Testing interrupt %lu\n", i);
 #endif

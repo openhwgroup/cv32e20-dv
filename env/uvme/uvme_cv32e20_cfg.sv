@@ -133,7 +133,7 @@ constraint cve2_riscv_cons {
       pmp_supported          == 0;
       debug_supported        == 1;
 
-      unaligned_access_supported     == 0;
+      unaligned_access_supported     == 1;
       unaligned_access_amo_supported == 0;
 
       bitmanip_version        == BITMANIP_VERSION_1P00;
