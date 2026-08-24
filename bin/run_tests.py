@@ -85,8 +85,7 @@ PATH, as for a normal `make test`.
     bin/run_tests.py --tb uvmt --gen-seed 363891135 --run-seed 354410829 \
         corev_rand_instr_and_data_stalls
 
-    # Collect code coverage (uvmt only; equivalent to `make test ... COV=1`
-    # per test -- see docs/COVERAGE-MAKE-TARGETS.md for the report targets):
+    # Collect code coverage (uvmt only; equivalent to `make test ... COV=1` per test):
     bin/run_tests.py --tb uvmt --cov hello-world
 
     # Other options:

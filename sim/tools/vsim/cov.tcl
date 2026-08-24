@@ -13,7 +13,7 @@ set RVB_DISABLED_COMMENT {RVB (Bitmanip) is disabled on the CVE2}
 # is nonetheless the CVE2 "umode" branch). If UmodeEnabled is ever wired up,
 # every exclusion gated on this variable needs revisiting.
 set UmodeEnabled 0
-set UMODE_DISABLED_COMMENT {UmodeEnabled=0 is hardcoded in cve2_cs_registers.sv -- umode_control is permanently 0, so any check that could distinguish PRIV_LVL_U from PRIV_LVL_M is structurally unreachable. See docs/RTL-STATEMENT-COVERAGE-AUDIT.md.}
+set UMODE_DISABLED_COMMENT {UmodeEnabled=0 is hardcoded in cve2_cs_registers.sv -- umode_control is permanently 0, so any check that could distinguish PRIV_LVL_U from PRIV_LVL_M is structurally unreachable.}
 
 
 # cve2_load_store_unit
