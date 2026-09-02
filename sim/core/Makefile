@@ -157,6 +157,37 @@ CV_CORE_RTLSRC        := $(filter-out $(CV_CORE_PKG)/rtl/$(CV_CORE_LC)_register_
 CV_CORE_MANIFEST      := $(CV_CORE_PKG)/cv32e20_manifest.flist
 export DESIGN_RTL_DIR  = $(CV_CORE_PKG)/rtl
 
+###############################################################################
+# Spike tandem (lock-step) verification support.
+#   make test TEST=<name> SPIKE_TANDEM=1
+# Compiles the RVFI-driven spike_tandem checker into the testbench and links
+# the tandem-patched Spike libraries (built into $(SPIKE_LIBS_DIR) by the
+# 'spike_lib' target of mk/Common.mk).  See docs/spike-tandem.md.
+SPIKE_TANDEM ?= 0
+ifneq ($(SPIKE_TANDEM), 0)
+  SV_CMP_FLAGS += +define+RVFI +define+SPIKE_TANDEM
+  # The package must precede its importers in compile order.
+  TBSRC_VERI   := $(TBSRC_CORE)/spike_tandem_pkg.sv \
+                  $(TBSRC_VERI) \
+                  $(TBSRC_CORE)/spike_tandem.sv
+  # libriscv.so does not record dependencies on its sister libraries, so name
+  # them all.  -Wno-WIDTHCONCAT: the st_rvfi struct is a ~1.5 Mbit packed
+  # vector; aggregate assignments to it trip Verilator's replication limit.
+  VERI_COMPILE_FLAGS += -Wno-WIDTHCONCAT
+  # --no-as-needed: the executable itself only calls into libriscv, but
+  # libriscv.so does not record DT_NEEDED entries for its sister libraries,
+  # so they must be force-loaded by the executable.
+  # --allow-shlib-undefined: libfesvr.so leaves vpi_get_vlog_info undefined
+  # (SimDTM.cc's VPI-based JTAG debug-transport shim, pulled in because
+  # EDA_INCLUDES also exposes Verilator's vpi_user.h to fesvr's build -
+  # see the EDA_INCLUDES comment in mk/Common.mk). spike_tandem.sv never
+  # exercises that code path, so the symbol is safe to leave unresolved.
+  VERI_COMPILE_FLAGS += -LDFLAGS "-L$(SPIKE_LIBS_DIR) -Wl,--no-as-needed -Wl,--allow-shlib-undefined -lriscv -lfesvr -ldisasm -lsoftfloat -lyaml-cpp -Wl,-rpath,$(SPIKE_LIBS_DIR)"
+  VERI_RUN_FLAGS     += +elf_file=$(TEST_PROGRAM_RELPATH)/$(TEST)/$(TEST).elf
+# The Spike shared libraries must exist before the Verilator link step.
+verilate: spike_lib
+endif
+
 check:
 	@echo "$(BANNER)"
 	@echo "* Generated variables:"

@@ -180,6 +180,10 @@ endif
 
 ###############################################################################
 # Generate command to clone CORE-V-VERIF (OpenHW's UVM Verification Library)
+# CV_VERIF_PKG was previously undefined, so the clone landed in the invoking
+# directory and the pinned-hash checkout silently failed.
+export CV_VERIF_PKG ?= $(CV32E20_DV)/vendor_lib/openhwgroup_core-v-verif
+
 ifeq ($(CV_VERIF_BRANCH), master)
   TMP9 = git clone $(CV_VERIF_REPO) --recurse $(CV_VERIF_PKG)
 else
@@ -534,7 +538,7 @@ ifeq ($(TEST_FIXED_ELF),1)
 	cp $(TEST_TEST_DIR)/$(TEST).elf $@
 else
 ifeq ($(TEST_ACT),1)
-%.elf: $(TEST_FILES) $(wildcard $(BSP)/*.S $(BSP)/*.c $(BSP)/*.h $(BSP)/link.ld)
+%.elf: $(TEST_FILES)
 	mkdir -p $(SIM_TEST_PROGRAM_RESULTS)
 	make bsp ACT=1
 	@echo "$(BANNER)"
@@ -556,7 +560,7 @@ ifeq ($(TEST_ACT),1)
 #		-lcv-verif
 
 else
-%.elf: $(TEST_FILES) $(wildcard $(BSP)/*.S $(BSP)/*.c $(BSP)/*.h $(BSP)/link.ld)
+%.elf: $(TEST_FILES)
 	mkdir -p $(SIM_TEST_PROGRAM_RESULTS)
 	make bsp
 	@echo "$(BANNER)"
@@ -765,9 +769,12 @@ dpi_dasm: $(DPI_DASM_SPIKE_PKG)
 	$(DPI_DASM_CXX) $(DPI_DASM_CFLAGS) $(DPI_DASM_INC) $(DPI_DASM_SRC) -o $(DPI_DASM_LIB)
 
 ###############################################################################
-# Build vendor/riscv-isa-sim into tools/
+# Build the tandem-patched riscv-isa-sim (Spike) into tools/
+# The Spike source is vendored inside the core-v-verif clone (see the
+# 'core-v-verif' target above), which carries the OpenHW tandem patches
+# (openhw::Simulation/Proc, riscv_dpi.cc) needed for lock-step verification.
 
-export SPIKE_PATH  = $(CV32E20_DV)/vendor/riscv/riscv-isa-sim
+export SPIKE_PATH  = $(CV32E20_DV)/vendor_lib/openhwgroup_core-v-verif/vendor/riscv/riscv-isa-sim
 export SPIKE_INSTALL_DIR = $(CV32E20_DV)/tools/spike/
 SPIKE_LIBS_DIR = $(SPIKE_INSTALL_DIR)/lib/
 SPIKE_FESVR_LIB = $(SPIKE_LIBS_DIR)/libfesvr
@@ -778,6 +785,12 @@ SPIKE_YAML_LIB = $(SPIKE_LIBS_DIR)/libyaml-cpp
 
 NUM_JOBS ?= 8
 
+# The Spike Makefile locates svdpi.h via $(VERILATOR_INSTALL_DIR)/share/verilator/
+# include/vltstd/, which assumes a 'make install'-style Verilator layout.  Derive
+# the vltstd path from the Verilator found in $PATH instead, so source-tree
+# installs (VERILATOR_ROOT/include/vltstd) work too, and override EDA_INCLUDES.
+SPIKE_VLTSTD_DIR = $(shell verilator --getenv VERILATOR_ROOT)/include/vltstd
+
 $(SPIKE_FESVR_LIB).so $(SPIKE_RISCV_LIB).so:
 	@echo "$(BANNER)"
 	@echo "Building SPIKE"
@@ -786,7 +799,7 @@ $(SPIKE_FESVR_LIB).so $(SPIKE_RISCV_LIB).so:
 	[ ! -f $(SPIKE_PATH)/build/config.log ] && cd $(SPIKE_PATH)/build && ../configure --prefix=$(SPIKE_INSTALL_DIR) || true
 	make -C $(SPIKE_PATH)/build/ -j $(NUM_JOBS) yaml-cpp-static;
 	make -C $(SPIKE_PATH)/build/ -j $(NUM_JOBS) yaml-cpp;
-	make -C $(SPIKE_PATH)/build/ -j $(NUM_JOBS) install;
+	make -C $(SPIKE_PATH)/build/ -j $(NUM_JOBS) EDA_INCLUDES="-I$(SPIKE_VLTSTD_DIR)" install;
 
 spike_lib: $(SPIKE_FESVR_LIB).so $(SPIKE_RISCV_LIB).so
 
@@ -837,8 +850,7 @@ rvvi_stub:
 	@echo "$(BANNER)"
 	@echo "Building $(RVVI_STUB)"
 	@echo "$(BANNER)"
-	$(RVVI_STUB_CXX) $(RVVI_STUB_CFLAGS) $(RVVI_STUB_SRC) -I$(DPI_INCLUDE) -o $(RVVI_STUB_LIB).$$$$.tmp && \
-	mv -f $(RVVI_STUB_LIB).$$$$.tmp $(RVVI_STUB_LIB)
+	$(RVVI_STUB_CXX) $(RVVI_STUB_CFLAGS) $(RVVI_STUB_SRC) -I$(DPI_INCLUDE) -o $(RVVI_STUB_LIB)
 
 #endend
 
