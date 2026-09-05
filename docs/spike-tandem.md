@@ -1,6 +1,6 @@
 # Spike Tandem Verification for the CV32E20 Core Testbench
 
-The "core" testbench (`tb/core`) can run the Spike instruction-set simulator
+The "core" testbench (`tb/core`) can optionally run the Spike instruction-set simulator
 in lock-step ("tandem") with the CV32E20 RTL.  Every instruction retired by
 the core (as reported on its RISC-V Formal Interface, RVFI) causes Spike to
 step by exactly one instruction, and the architectural state changes reported
@@ -93,10 +93,17 @@ that the checker is armed.
 
 ## Spike configuration details
 
-The checker mirrors the RTL configuration in `spike_tandem_init()`:
+The "spike_tandem" module at `tb/core/spike_tandem.sv` (also refered to as "the checker")
+mirrors the RTL configuration in `spike_tandem_init()`:
 
-- **ISA / priv**: `rv32imc_zicsr_zifencei`, privilege modes M+U.  This
-  reproduces the RTL `misa` value 0x40101104 (cve2_cs_registers.sv).
+- **ISA / priv**: `rv32imc_zicsr_zifencei`, M-mode only.  This reproduces the
+  RTL `misa` value 0x40001104 (`UmodeEnabled=0` in cve2_cs_registers.sv, so no
+  U bit).
+- **mstatus write mask**: `mstatus_write_mask=0x88` (MIE/MPIE only).  With
+  `UmodeEnabled=0`, the RTL ANDs writes to MPRV and TW with `umode_control`
+  (always 0 here) and clamps any non-M value written to MPP back to M, so
+  those bits are effectively hardwired; without this mask Spike accepts
+  writes to them and diverges on the next readback.
 - **Boot address**: Spike's PC after reset is set to `{BOOT_ADDR[31:2],2'b00}`
   (the CVE2 fetches its first instruction at the boot address directly; there
   is no Spike boot ROM in this configuration).
@@ -117,11 +124,96 @@ The checker mirrors the RTL configuration in `spike_tandem_init()`:
   value when the program reads free-running counters (cycle/mcycle/mip), so
   these do not cause false mismatches.
 
+## HPM counter/event injection
+
+`csr_counters_injection` (see "Spike configuration details" above)
+originally only covered `cycle`/`mcycle`/`mip` reads: the vendored
+tandem-patched Spike's `Proc.cc` gated the injection logic behind a
+`switch (read_csr)` whose only cases were `CSR_MIP`, `cycle`, `cycleh`,
+`mcycle`, and `mcycleh`. Reads of the general programmable HPM
+counters/events (`mhpmcounter3..31`, `mhpmcounter3h..31h`,
+`mhpmevent3..31` - each a contiguous CSR-address range) fell through to
+`default: break;` and compared against Spike's own, differently-counted
+value instead of the RTL's. Fixed by replacing that `switch` with a
+`counter_csr` boolean covering the same five fixed addresses plus
+range-checks against `CSR_MHPMCOUNTER3..CSR_MHPMCOUNTER31`,
+`CSR_MHPMCOUNTER3H..CSR_MHPMCOUNTER31H`, and `CSR_MHPMEVENT3..CSR_MHPMEVENT31`
+(`encoding.h` defines each range's bounds; the addresses in between are
+unused/reserved but never referenced by real CVE2 test programs, so no gap
+matters in practice).
+
+**Coverage note:** injection means Spike *accepts* the RTL's counter value
+rather than independently computing one, so a bug in the RTL's counting
+logic itself cannot be caught this way. This is unavoidable for
+`mcycle`/`NumCycles` and the other cycle/stall-timing events
+(`NumCyclesLSU`, `NumCyclesIF`, `NumCyclesWFI`, `NumCyclesDivWait` -
+`mhpmcounter3/4/11/12`), which depend on pipeline/memory timing a functional
+ISS has no model of - these stay forwarded.
+- `mhpmcounter3/4/11/12` and `mhpmevent3..31` are the only ones
+forwarded via `counter_csr`.
+
+## HPM counter/event independent modeling (mhpmcounter5..10)
+
+`mhpmcounter5..10` (`NumLoads`, `NumStores`, `NumJumps`, `NumBranches`,
+`NumBranchesTaken`, `NumInstrRetC` - CVE2's hardwired event assignment per
+the CVE2 Performance Counter spec) are computed independently by
+Spike instead of being forwarded from the RTL.
+
+<!--
+TODO: deside if these details are worth keeping in this document...
+
+- **Backing storage**: each of the 6 counters gets a real `basic_csr_t`
+  register (installed into `csrmap` in `Processor`'s constructor,
+  wrapped in `rv32_low_csr_t`/`rv32_high_csr_t` for the RV32 32-bit-half
+  split, the same pattern the base Spike uses for `mcycle`/`minstret`),
+  replacing the `const_csr_t(0)` the unmodified base installs. `mcountinhibit`
+  (`0x320`) also gets a real `basic_csr_t` (base Spike hardwires it to a
+  read-only 0), so software's per-counter inhibit bits are honored.
+  **Registered after `this->reset()` runs**, not before: registering earlier
+  in the constructor was silently clobbered by `processor_t::reset()`
+  rebuilding `csrmap`, leaving the `Processor`'s own `shared_ptr` members
+  pointing at an orphaned register while `csrmap` held a fresh
+  `const_csr_t(0)` again.
+- **Why `basic_csr_t`, not `wide_counter_csr_t`** (the class `mcycle`/
+  `minstret` use): `wide_counter_csr_t::unlogged_write()` deliberately writes
+  the given value then immediately decrements it by 1, to compensate for the
+  unconditional `bump()` that `mcycle`/`minstret` always receive once per
+  step in `execute.cc`. These counters only get bumped conditionally (on a
+  qualifying event), so that compensation doesn't apply - it corrupted every
+  software reset (`csrwi 0xB05, 0`) into -1 instead of 0. `basic_csr_t` has
+  no such assumption baked in.
+- **Event detection**: opcode match/mask against `rvfi.insn`, not
+  `log_mem_read`/`log_mem_write` (Spike's MMU access log) - those are only
+  populated when `get_log_commits_enabled()` is set, which this DPI
+  co-simulation flow never turns on, so `NumLoads`/`NumStores` are detected
+  the same way as jumps/branches: `encoding.h`'s existing `MATCH_*`/`MASK_*`
+  constants, covering both base and compressed forms. Does not implement the
+  "misaligned counted as two accesses" rule from
+  `doc/03_reference/performance_counters.rst` - not exercised by any current
+  test, but a known simplification.
+- **Branch-taken detection**: NOT `next_pc != fall-through_pc`. A branch
+  whose target coincides with the fall-through address - `beq x0, x0, 1f`
+  immediately followed by `1:`, exactly what `hpmcounter_basic_test` does -
+  is still taken even though the PC doesn't visibly change; the PC-based
+  heuristic silently miscounted this as not-taken. Fixed by evaluating the
+  actual funct3-selected comparison (`BEQ`/`BNE`/`BLT`/`BGE`/`BLTU`/`BGEU`)
+  against Spike's own operand values, for base-ISA branches. Compressed
+  `C.BEQZ`/`C.BNEZ` still use the PC-comparison heuristic - not exercised by
+  any current test, another known simplification.
+- **Increment without contaminating the current retirement's CSR trace**:
+  `write(val, /*log=*/false)` - `openhw::reg::write()`'s log parameter -
+  keeps a background bump (a side effect of an unrelated retiring
+  instruction, e.g. an `lw`) out of `log_reg_write`, so it can never look
+  like that unrelated instruction wrote a CSR. (In practice this specific
+  concern turned out moot - `spike_tandem.sv`'s `compare_retirement()` never
+  compares `csr_valid`/`csr_wdata` at all, only `rd1_wdata` - but the
+  unlogged write is correct regardless and costs nothing.)
+-->
+
 ## Interrupt injection
 
 Asynchronous interrupts are injected into Spike (`interrupts_injection=1`) so
-that tests using the mm_ram interrupt peripherals no longer mismatch at the
-first taken interrupt.
+that tests using the mm_ram interrupt peripherals match the first taken interrupt.
 
 CVE2's RVFI interface truncates away the info Spike needs for this: its
 top-level 1-bit `rvfi_intr` port is assigned from an internal 9-bit
@@ -147,43 +239,75 @@ the RTL's single retirement. `unified_traps=1` makes Spike's step loop
 continue past the trap-taking to actually retire the handler's first
 instruction in the same call.
 
-## Current limitations (phase 1)
+**Note**: the `mcause_to_mip()` backdoor-write above is purely a
+control-flow synchronization mechanism - it tells Spike *when* and *which*
+interrupt to take, so its own trap entry lands on the same instruction
+boundary as the RTL's. It does not verify `mip`'s value; that is a separate
+mechanism, described next.
 
-- **Debug mode is not modeled** (`debug_injection=0`): debug-request tests
-  will mismatch on entry to the debug ROM.
-- **Loads from testbench virtual peripherals** (e.g. the mm_ram timer
-  registers or random-number register) return values Spike cannot predict and
-  will mismatch.  Stores are harmless.
-- **CSR write-back values are not compared** - only the GPR effects of CSR
-  instructions are checked.  Full CSR comparison is planned with the RVVI
-  wrapper (see below).
-- The comparison covers PC, instruction word, trap flag, privilege mode and
-  rd write-back.  Memory access address/data comparison is not yet enabled.
+## Debug-mode entry independent verification
 
-## Bring-up results (2026-06-11, interrupt injection added 2026-09-02)
+The CVE2 has four ways to enter debug mode.
+Of those, the three below are fully supported by Spike:
 
-| Test                          | Result | Retirements verified | Notes                                   |
-| ----------------------------- | ------ | -------------------- | --------------------------------------- |
-| hello-world                   | PASS   | 10,837               | includes ID-CSR reads                    |
-| fibonacci                     | PASS   | 69,443               |                                          |
-| misalign                      | PASS   | 208,231              | hardware-handled misaligned accesses     |
-| illegal                       | PASS   | 5,865                | illegal-instruction exception + handler  |
-| riscv_arithmetic_basic_test_0 | PASS   | 11,422               |                                          |
-| dhrystone                     | PASS   | 118,860              |                                          |
-| branch_zero                   | PASS   | 3,750,790            | mm_ram fast interrupts; see Interrupt injection above |
+- **`ebreak` with `dcsr.ebreakm` set** (`DCSR_CAUSE_SWBP`) and **single-step**
+  (`dcsr.step`, `DCSR_CAUSE_STEP`) are fully self-contained in Spike's own
+  `execute.cc` - triggered purely by Spike's own instruction execution and its
+  own `dcsr` state, no RTL forwarding involved, unaffected by this change.
+- **External halt request** (`DCSR_CAUSE_HALTREQ`) is asynchronous and
+  testbench-injected (`mm_ram`'s virtual "debugger" register drives
+  `debug_req_o`, an `mm_ram.sv` peripheral feature, not DUT logic) - this is
+  the one cause this fix actually forwards, in the same "testbench peripheral,
+  costs nothing to forward" category as the timer/RNG registers.
+- **Hardware trigger match** (`DCSR_CAUSE_TRIGGER`) is real DUT logic
+  (`cve2_cs_registers.sv`'s `tselect`/`tdata1`/`tdata2` trigger-match block),
+  forwarded the same way as haltreq below; whether Spike's own trigger-module
+  (`TM`) CSR modeling is complete enough to make this independently verifiable
+  the way `mip` was is unexplored - not attempted here.
 
-The `+tandem_inject_error` self-test was verified to abort the simulation
-with a `TANDEM MISMATCH` report when the RTL-side rd value is corrupted.
+
+Asserting `debug_req` to the RTL model is not visible to Spike, so we use
+the same whitebox-probe technique already established for
+mcause (`rvfi_stage_intr[0]`, "Interrupt injection" above):
+
+- `cve2_core.sv` computes a genuine one-shot debug-entry cause tag internally:
+  `rvfi_dbg <= captured_debug_valid ? captured_debug_cause : 0`, gated by
+  `debug_csr_save` in `cve2_controller.sv` and cleared as soon as the next
+  instruction enters ID - asserted for exactly the entry retirement, never
+  held. Its cause encoding (`cve2_pkg.sv`: `DBG_CAUSE_EBREAK=1,
+  DBG_CAUSE_TRIGGER=2, DBG_CAUSE_HALTREQ=3, DBG_CAUSE_STEP=4`) is numerically
+  identical to Spike's own `DCSR_CAUSE_*` in `encoding.h`, so it forwards
+  verbatim with no remapping.
+- `cv32e20_tb_wrapper.sv` probes this hierarchically as `rvfi_dbg_cause =
+  cv32e20_top_inst.u_cve2_core.rvfi_stage_dbg[0]` (`RVFI_STAGES=1`, so index
+  `[0]` is exactly time-aligned with the retirement, same reasoning as
+  `rvfi_intr_cause`), and also probes `debug_mode` directly as
+  `rvfi_dbg_mode` for the new comparison below.
+- `spike_tandem.sv`'s `tandem_step()` assigns `s_core.dbg = {60'b0,
+  rvfi_dbg_cause}` every step - `st_rvfi.dbg` is a dedicated struct field (not
+  smuggled through `csr_rdata[]` like mcause/mip), and `Proc.cc:58-66` already
+  reads it directly (`if (reference->dbg && !debug_mode && debug_injection &&
+  !halted()) enter_debug_mode(reference->dbg)`) - no C++ changes were needed
+  for this fix.
+- `compare_retirement()` gained a new check: `s_ref.dbg_mode[0] !==
+  rvfi_dbg_mode`. `Proc.cc:100` already populates `rvfi.dbg_mode =
+  this->get_state()->debug_mode` as an output, but nothing compared it to the
+  RTL before - this is a genuine independent cross-check that Spike and the
+  RTL agree on debug-mode occupancy at every retirement, not just at entry.
+
+## mm_ram TICKS peripheral forwarding (fixed) - coremark now fully passes
+
+In order to support the `coremark` test program, it is necessary to forward
+the "TICKS" platform CSR implemented in the `mm_ram` to the `mcycle` CSR.
 
 ## Relationship to the RVVI-API
 
-This phase-1 integration uses the CVA6-style `spike_create()`/`spike_step()`
+We re-use the CVA6-style `spike_create()`/`spike_step()`
 DPI interface that ships with the tandem-patched Spike.  The longer-term goal
 of the SPIKE_TANDEM project is to wrap the Spike reference model behind the
 standard [RVVI-API](https://github.com/riscv-verification/RVVI) so that the
-testbench-side protocol is reference-model agnostic.  The checker module was
-written so that only `spike_tandem_init()` and `tandem_step()` need to change
-when that wrapper exists.
+testbench-side protocol is reference-model agnostic.  The spike_tandem module was
+written so that only `spike_tandem_init()` and `tandem_step()` need to change.
 
 ## Rebuilding Spike
 
@@ -194,3 +318,36 @@ make spike_lib            # builds into <repo>/tools/spike/{lib,include}
 
 The Spike build needs `svdpi.h`; the Makefile locates it from the Verilator
 in `$PATH` (`verilator --getenv VERILATOR_ROOT`).
+
+`spike_lib`'s targets are plain files (`tools/spike/lib/{libriscv,libfesvr}.so`)
+with no dependency on Spike's own sources, so it only rebuilds when those
+`.so`s don't exist yet -- editing `Proc.cc` and re-running `make spike_lib`
+does nothing.  Force a rebuild either by removing the `.so`s first:
+
+```bash
+rm -f tools/spike/lib/libriscv.so tools/spike/lib/libfesvr.so
+make spike_lib
+```
+
+or by invoking the underlying build directly, which always recompiles
+whatever changed:
+
+```bash
+make -C vendor_lib/openhwgroup_core-v-verif/vendor/riscv/riscv-isa-sim/build/ \
+    -j8 EDA_INCLUDES="-I$(verilator --getenv VERILATOR_ROOT)/include/vltstd" install
+```
+
+If `vendor_lib/openhwgroup_core-v-verif` itself is missing (e.g. a fresh
+checkout, or `tools/` and the vendor clone were wiped -- both are
+`.gitignore`'d, so this is silent), re-clone it at the pinned hash first:
+
+```bash
+cd sim/core
+make core-v-verif         # re-clones vendor_lib/openhwgroup_core-v-verif
+                           # at the hash pinned in sim/ExternalRepos.mk
+make spike_lib
+```
+
+`bin/run_tests.py --spike-tandem` runs `make spike_lib` itself before any
+test/certify run, so the common case (Spike already built) is a fast no-op;
+a first-time or post-wipe build can take several minutes.

@@ -101,6 +101,26 @@ module cv32e20_tb_wrapper
     // exactly time-aligned with rvfi_valid/rvfi_intr. spike_tandem needs the
     // full value to inject interrupts into Spike (see docs/spike-tandem.md).
     wire [8:0] rvfi_intr_cause = cv32e20_top_inst.u_cve2_core.rvfi_stage_intr[0];
+
+    // Whitebox probe: cve2_core.sv computes a one-shot debug-entry cause tag
+    // in its internal rvfi_dbg (captured_debug_valid ? captured_debug_cause :
+    // 0, cleared as soon as the next instruction enters ID), pipelined into
+    // rvfi_stage_dbg[]. RVFI_STAGES=1 here, so index [0] is exactly
+    // time-aligned with this retirement, same reasoning as rvfi_intr_cause
+    // above. Cause encoding (cve2_pkg.sv DBG_CAUSE_EBREAK/TRIGGER/HALTREQ/
+    // STEP = 1/2/3/4) matches Spike's own DCSR_CAUSE_* 1:1, so it can be
+    // forwarded verbatim. The top-level rvfi_ext_debug_req port is
+    // deliberately NOT used for this: it is a raw, level-held echo of the
+    // debug_req_i pin with no cause information, not a one-shot entry-exact
+    // tag, and using it would risk Spike entering debug mode a retirement or
+    // more before the RTL does. See docs/spike-tandem.md.
+    wire [3:0] rvfi_dbg_cause = cv32e20_top_inst.u_cve2_core.rvfi_stage_dbg[0];
+
+    // Whitebox probe of the RTL's own debug_mode state, for an independent
+    // cross-check that Spike and the RTL agree on debug-mode occupancy at
+    // every retirement (not just entry) - see spike_tandem.sv's
+    // compare_retirement().
+    wire rvfi_dbg_mode = cv32e20_top_inst.u_cve2_core.debug_mode;
 `endif
 
     // irq signals (driven from mm_ram virtual interrupt peripheral)
@@ -270,7 +290,10 @@ module cv32e20_tb_wrapper
          .rvfi_mem_wmask ( rvfi_mem_wmask ),
          .rvfi_mem_rdata ( rvfi_mem_rdata ),
          .rvfi_mem_wdata ( rvfi_mem_wdata ),
-         .rvfi_intr_cause( rvfi_intr_cause)
+         .rvfi_intr_cause( rvfi_intr_cause),
+         .rvfi_ext_irq   ( irq_from_mm_ram),
+         .rvfi_dbg_cause ( rvfi_dbg_cause ),
+         .rvfi_dbg_mode  ( rvfi_dbg_mode  )
         );
 `endif
 

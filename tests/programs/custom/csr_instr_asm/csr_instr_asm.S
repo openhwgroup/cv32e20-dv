@@ -37,6 +37,24 @@ _start:
 .section .text
 _start_main:
 
+  # This test never set up mtvec, so any CSR access this sweep assumes is
+  # legal but actually isn't (e.g. menvcfg/menvcfgh on a build with U-mode
+  # disabled - see docs/suggested_bug_reports.md) traps to the hart's
+  # reset-default vector, which isn't a real handler and hangs the test.
+  #
+  # Install a local handler. cve2_cs_registers.sv:515-516 shows CVE2 forces
+  # *every* mtvec write unconditionally into vectored mode with the base
+  # masked to a 256-byte boundary (`{csr_wdata_int[31:8], 6'b0, 2'b01}`),
+  # regardless of what's actually written - so csr_sweep_trap_handler below
+  # is deliberately `.balign 256`-ed to match, or CVE2 would silently
+  # truncate the base to some unrelated, unaligned address (confirmed by an
+  # earlier, unaligned attempt: execution landed 40 bytes into an unrelated
+  # routine elsewhere in this file). Every instruction in this sweep is a
+  # full 4-byte csrrX (no compressed variants), so the handler's
+  # unconditional mepc += 4 is sufficient.
+  la   t0, csr_sweep_trap_handler
+  csrw mtvec, t0
+
   #ifdef NO_PULP
   #define EXP_MISA 0x40001104
   #else
@@ -6486,3 +6504,21 @@ csr_fail:
 #
 # end
 #
+
+# Minimal trap handler for the CSR sweep above - see the mtvec setup at the
+# top of _start_main. CVE2 forces every mtvec write into vectored mode with
+# the base masked to a 256-byte boundary, so this label must actually land
+# on one - hence the explicit .balign (a bare label here has no alignment
+# guarantee otherwise). This sweep only ever causes synchronous
+# illegal-instruction exceptions on itself (no interrupts expected), and
+# vectored mode still sends synchronous exceptions to the plain base
+# address (entry 0), same as direct mode would - so one unconditional
+# handler at the aligned base is sufficient; no real vector table needed.
+# Every faulting instruction in this sweep is a full-width csrrX, so just
+# skip it and resume.
+.balign 256
+csr_sweep_trap_handler:
+    csrr t0, mepc
+    addi t0, t0, 4
+    csrw mepc, t0
+    mret

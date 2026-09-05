@@ -88,6 +88,23 @@ PATH, as for a normal `make test`.
     # Collect code coverage (uvmt only; equivalent to `make test ... COV=1` per test):
     bin/run_tests.py --tb uvmt --cov hello-world
 
+    # Run in tandem with the Spike ISS, comparing every retired instruction
+    # (core only; equivalent to `make test ... SPIKE_TANDEM=1` per test; see
+    # docs/spike-tandem.md):
+    bin/run_tests.py --spike-tandem
+
+    # Run the ACT4 compliance-ELF sweep (core only; equivalent to
+    # `make certify` in sim/core) instead of the named test set:
+    bin/run_tests.py --certify
+
+    # Same, but with every compliance ELF checked against Spike in tandem
+    # (equivalent to `make certify SPIKE_TANDEM=1`):
+    bin/run_tests.py --certify --spike-tandem
+
+    # Narrow the certify sweep to one extension subdirectory (passed through
+    # as FILTER=... to `make certify`; see sim/core/Makefile):
+    bin/run_tests.py --certify --filter rv32i/Zicsr
+
     # Other options:
     #   --cfg NAME      uvmt config subdirectory                (default: default)
     #   --run-index N   RUN_INDEX subdirectory                  (default: 0)
@@ -96,6 +113,15 @@ PATH, as for a normal `make test`.
     #   --timeout SECS  per-test timeout                        (default: 1800)
     #   --jobs N, -j N  run up to N tests concurrently           (default: 1)
     #   --cov           collect code coverage (uvmt only)
+    #   --spike-tandem  run in tandem with Spike, comparing every retired
+    #                   instruction (core only; see docs/spike-tandem.md).
+    #                   Builds Spike via `make spike_lib` first if needed --
+    #                   can take several minutes the first time.
+    #   --certify       run the ACT4 compliance-ELF sweep (`make certify`,
+    #                   core only) instead of the named test set; combine
+    #                   with --spike-tandem to certify in tandem with Spike
+    #   --filter PATH   narrow --certify to one extension subdirectory
+    #                   (passed through as FILTER=PATH to `make certify`)
     #   --quiet         suppress per-test simulation banners
     #   -h / --help     full option help
 
@@ -158,14 +184,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO = SCRIPT_DIR.parent
 
-# Guards stdout so concurrent workers (--jobs > 1) don't interleave lines from
-# different tests mid-block; each worker holds it only long enough to print
-# its own (possibly multi-line) announcement or banner block.
+# Serializes stdout so concurrent --jobs workers don't interleave output.
 _print_lock = threading.Lock()
 
-# Per-testbench configuration.  Each entry knows where to run make, which extra
-# make arguments to pass, the verdict banners its testbench prints, and how to
-# locate a test's log file.
+# Per-testbench config: sim dir, extra make args, pass/fail banners, log markers.
 TESTBENCHES = {
     "core": {
         "sim_dir": REPO / "sim" / "core",
@@ -185,8 +207,7 @@ TESTBENCHES = {
     },
 }
 
-# Self-checking C test-programs cleaned up on this branch.  These verify their
-# own results and signal the canonical pass/fail, so they pass on the core TB.
+# Self-checking C test-programs.
 C_TESTS = [
     "hello-world",
     "fibonacci",
@@ -203,10 +224,7 @@ C_TESTS = [
     "debug_test",
 ]
 
-# Self-checking assembly test-programs cleaned up on this branch.  Each was
-# fixed to build and to signal end-of-test through the canonical protocol
-# (TEST_PASS/TEST_FAIL in bsp/cv32e20_dv.h, writing 123456789 / 1); each passes
-# on the core TB.
+# Self-checking assembly test-programs.
 ASM_TESTS = [
     "load_store_rs1_zero",
     "illegal_instr_test",
@@ -217,16 +235,10 @@ ASM_TESTS = [
 # Default (core TB) selection: every self-checking test, C and assembly.
 TESTS = C_TESTS + ASM_TESTS
 
-# Parked tests: these build and signal correctly, but their *meaningful*
-# verification is not a self-check on the core TB.  Included only with
-# --include-parked, and intended to be run with --tb uvmt:
-#   * riscv_arithmetic_basic_test_0/1 and csr_instr_asm exercise long fixed
-#     instruction streams whose correctness is checked by the RVFI step-compare
-#     against the Spike ISS (sim/uvmt); on the core TB they pass *vacuously*.
-#   * riscv_csr additionally needs the M-only counter-CSR reconciliation (see
-#     README parked-work notes).
-#   * the debug_test variants need the uvmt debug-request stimulus; on the core
-#     TB they report FAIL because debug mode is never entered.
+# Tests that build and run but aren't meaningfully self-checking on the core
+# TB (pass vacuously, or FAIL outright for debug_test variants since debug
+# mode needs uvmt stimulus) -- real verification needs --tb uvmt. Opt-in via
+# --include-parked.
 PARKED = [
     "riscv_arithmetic_basic_test_0",
     "riscv_arithmetic_basic_test_1",
@@ -239,30 +251,17 @@ PARKED = [
     "debug_test_trigger",
 ]
 
-# Directed tests that are part of the standard regression (unlike PARKED,
-# not opt-in) but only make sense on the uvmt TB, since they need uvmt-only
-# stimulus with no core-TB equivalent. Automatically added to the default
-# selection whenever --tb uvmt is chosen (see main()); ignored for --tb core.
-#   * nmi_test needs the uvmt interrupt-agent's +nmi_assert stimulus (see
-#     uvme_cv32e20_nmi_assert_vseq.sv); on the core TB the NMI line is never
-#     asserted.
+# uvmt-only directed tests (not opt-in like PARKED) -- need stimulus with no
+# core-TB equivalent (e.g. nmi_test's +nmi_assert), so added automatically
+# only when --tb uvmt is selected (see main()).
 UVMT_TESTS = [
     "nmi_test",
 ]
 
-# corev-dv (OpenHW's class extensions of Google's riscv-dv) generated regression
-# templates under tests/programs/corev-dv/.  Unlike C_TESTS/ASM_TESTS/PARKED,
-# each of these needs its randomized test program generated before it can be
-# built and run, i.e. `make gen_corev-dv test TEST=<name>` rather than plain
-# `make test TEST=<name>`, where run_test() adds the extra target automatically for
-# names in this list. Meaningful only under --tb uvmt (corev-dv generation is
-# wired up for the uvmt testbench only); included only with --include-corev-dv
-# or --corev-dv-only.
-#
-# Before any test in this list can build, `make corev-dv` (clone + compile the
-# corev-dv/riscv-dv packages) must have been run once in sim/uvmt; main() does
-# this automatically whenever the selected set includes a corev-dv test.
-#
+# corev-dv generated regression templates (tests/programs/corev-dv/) -- need
+# `make gen_corev-dv test` instead of plain `make test` (run_test() handles
+# this), and `make corev-dv` run once first (main() does this automatically).
+# uvmt only; opt-in via --include-corev-dv/--corev-dv-only.
 COREV_DV_TESTS = [
     "corev_rand_arithmetic_base_test",
     "corev_rand_instr_test",
@@ -294,12 +293,9 @@ def log_path(tb, test, run_index, cfg):
 
 
 def gen_log_path(tb, test, run_index, cfg):
-    """Location of the corev-dv generation step's own log file. This is a
-    fully separate vsim invocation/UVM environment from the test's own
-    vsim-<test>.log (log_path() above) -- gen_corev-dv builds the randomized
-    instruction stream, test builds+runs the firmware -- so it gets its own
-    independent -sv_seed. GEN_NUM_TESTS is never overridden by this script
-    (Makefile default 1), hence the fixed "_1" in the filename."""
+    """Location of the corev-dv generation step's own log (a separate vsim
+    run from the test's own log, hence its own seed). "_1" is
+    GEN_NUM_TESTS's unoverridden Makefile default."""
     sim_dir = TESTBENCHES[tb]["sim_dir"]
     return (sim_dir / "vsim_results" / cfg / "corev-dv" / test
             / f"{test}_{run_index}_1.log")
@@ -309,10 +305,8 @@ _SEED_RE = re.compile(r"-sv_seed\s+(\S+)")
 
 
 def extract_seed(text):
-    """Pull the actual -sv_seed value a vsim invocation was run with out of
-    its console output or log file. Needed whenever SEED=random is used --
-    the Makefile picks the real value internally (`date +%N`), so the caller
-    never sees it on the command line it constructed."""
+    """Pull the actual -sv_seed a vsim run used from its output/log -- needed
+    when SEED=random, since the Makefile derives the real value internally."""
     m = _SEED_RE.search(text)
     return m.group(1) if m else None
 
@@ -327,9 +321,8 @@ def classify(text, tbcfg):
 
 
 def make_env(tbcfg):
-    """Environment for a make invocation: os.environ plus tbcfg's make_args
-    (e.g. SIMULATOR=vsim) mirrored in, so any sub-make/shell that reads the
-    variable directly behaves consistently with what's on the command line."""
+    """os.environ plus tbcfg's make_args mirrored in (e.g. SIMULATOR=vsim), so
+    sub-make/shell reads of the variable match the command line."""
     env = os.environ.copy()
     for arg in tbcfg["make_args"]:
         key, _, val = arg.partition("=")
@@ -339,11 +332,9 @@ def make_env(tbcfg):
 
 
 def _run(cmd, cwd, env, timeout, capture):
-    """Run cmd in its own process group (session) so a timeout can kill the
-    whole tree, not just the immediate child. Without this, a `make` that
-    times out leaves its own child (e.g. vsim) running as an orphan: the
-    simulation keeps going for real in the background while the script
-    reports a false timeout and moves on to the next test."""
+    """Run cmd in its own process group so a timeout kills the whole tree,
+    not just `make` -- otherwise its child (e.g. vsim) orphans and keeps
+    running in the background."""
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -363,9 +354,8 @@ def _run(cmd, cwd, env, timeout, capture):
 
 
 def setup_corev_dv(tb, timeout):
-    """Run `make corev-dv` once: clones and compiles the corev-dv/riscv-dv
-    packages.  Required before any COREV_DV_TESTS entry can build; aborts the
-    script on failure since no corev-dv test can proceed without it."""
+    """Run `make corev-dv` once (clones+compiles corev-dv/riscv-dv); aborts
+    the script on failure since no COREV_DV_TESTS entry can build without it."""
     tbcfg = TESTBENCHES[tb]
     cmd = ["make", "corev-dv"] + tbcfg["make_args"]
     env = make_env(tbcfg)
@@ -383,18 +373,36 @@ def setup_corev_dv(tb, timeout):
                   "no corev-dv test can build without it")
 
 
-def setup_comp(tb, timeout, cov=False):
-    """Run `make comp` once: compiles the main testbench (uvmt_*_tb_vopt) into
-    the shared work library. Required before a --jobs > 1 batch can safely
-    pass COMP=NO to its workers -- without a compiled design already sitting
-    in the shared library, every worker would either fail (nothing to run
-    against) or race to compile it themselves. Aborts the script on failure.
+def setup_spike_lib(tb, timeout):
+    """Run `make spike_lib` once so --spike-tandem builds show a real
+    diagnostic on failure instead of the opaque "make exited N" that
+    run_test()/run_certify() report -- otherwise a first-time (or broken)
+    Spike build only surfaces via the make test/certify -> verilate ->
+    spike_lib dependency, with its output swallowed by capture=True."""
+    tbcfg = TESTBENCHES[tb]
+    cmd = ["make", "spike_lib"] + tbcfg["make_args"]
+    env = make_env(tbcfg)
 
-    cov: pass COV=1 to this compile so vopt instruments the design with
-    +cover -- required when the --jobs > 1 batch will also run with --cov,
-    since workers pass COMP=NO and reuse this shared compile as-is (without
-    this, every worker's .ucdb ends up with no statement/branch/condition
-    coverage at all, only assertions/covergroups)."""
+    print(f"[Setup/{tb}] make spike_lib (tandem-patched Spike; see "
+          "docs/spike-tandem.md) ...")
+    try:
+        returncode, _, _ = _run(cmd, tbcfg["sim_dir"], env, timeout, capture=False)
+    except subprocess.TimeoutExpired:
+        sys.exit(f"error: 'make spike_lib' timed out after {timeout}s")
+    except OSError as exc:
+        sys.exit(f"error: could not launch 'make spike_lib': {exc}")
+
+    if returncode != 0:
+        sys.exit(f"error: 'make spike_lib' failed (exit {returncode}); "
+                  "no --spike-tandem run can build without it")
+
+
+def setup_comp(tb, timeout, cov=False):
+    """Run `make comp` once so a --jobs > 1 batch can safely pass COMP=NO --
+    otherwise workers race to compile the shared work library themselves.
+
+    cov: also pass COV=1, or workers reusing this compile get no statement/
+    branch/condition coverage in their .ucdb (assertions/covergroups only)."""
     tbcfg = TESTBENCHES[tb]
     cmd = ["make", "comp"] + tbcfg["make_args"]
     if cov:
@@ -415,51 +423,29 @@ def setup_comp(tb, timeout, cov=False):
 
 
 def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None,
-             label=None, gen_seed="random", run_seed="random", cov=False):
-    """Build+run one test on the chosen testbench; return
-    (outcome, detail, gen_seed_used, run_seed_used).
+             label=None, gen_seed="random", run_seed="random", cov=False,
+             spike_tandem=False):
+    """Build+run one test; return (outcome, detail, gen_seed_used, run_seed_used).
 
-    For corev-dv tests, gen_corev-dv (the corev-dv/riscv-dv random program
-    generator) and test (the actual firmware run) are two fully independent
-    UVM environments/vsim invocations that compile and run separately -- so
-    each gets its own `make` invocation and its own independent SEED=
-    assignment, rather than one combined `make gen_corev-dv test` call. That
-    matters for reproduction: a single SEED=<literal value> on one combined
-    invocation would force both steps to the *same* RNDSEED (mk/uvmt/uvmt.mk
-    only re-derives a fresh value from `date +%N` when SEED=random; a literal
-    value is just reused as-is), which can't reproduce a historical run where
-    the two steps happened to draw different random seeds.
-    gen_seed_used/run_seed_used are the actual -sv_seed values each step's
-    vsim was invoked with (extracted from console/log output -- needed
-    whenever SEED=random, since the Makefile picks the real value internally
-    and it never appears on the command line this function constructs).
-    Both are None for non-corev-dv tests, which have no separate generation
-    step and are never given an explicit SEED.
-
-    extra_make_args: additional make variable assignments appended to each
-    command line (e.g. ["COMP=NO"] for a --jobs > 1 batch that already had
-    setup_comp() run once beforehand).
-    cov: pass COV=1 to the actual firmware build+run (equivalent to `make
-    test ... COV=1`), so vopt instruments the design and Questa writes a
-    .ucdb -- see docs/COVERAGE-MAKE-TARGETS.md for the report targets that
-    consume it. Deliberately NOT passed to the gen_corev-dv step above: that's
-    a separate UVM environment/vsim invocation (the random-program generator,
-    unrelated to the DUT), so instrumenting it would be pointless.
-    label: when set (--jobs > 1), prefixes each printed banner line with the
-    test name so concurrent workers' output stays distinguishable; printing
-    is done as one locked block per test so lines from different tests can't
-    interleave mid-line.
+    corev-dv tests run gen_corev-dv and test as two independent vsim
+    invocations with independent seeds (SEED=random re-derives per step, so
+    one combined seed couldn't replay a run where the two steps differed).
+    gen_seed_used/run_seed_used are the actual -sv_seed each step used; both
+    None for non-corev-dv tests.
+    extra_make_args: extra make args appended (e.g. ["COMP=NO"] after setup_comp()).
+    cov: COV=1 for the firmware build+run only -- skipped for gen_corev-dv,
+    which is unrelated to the DUT.
+    label: prefixes output when --jobs > 1 so workers stay distinguishable.
+    spike_tandem: SPIKE_TANDEM=1, core only -- see docs/spike-tandem.md.
     """
     tbcfg = TESTBENCHES[tb]
     env = make_env(tbcfg)
     gen_seed_used = None
 
     if test in COREV_DV_TESTS:
-        # gen_corev-dv generates into <test>/$(GEN_START_INDEX)/test_program/,
-        # independently of RUN_INDEX (which only selects where the build/run
-        # step looks for that program). Without this, a non-zero --run-index
-        # generates into .../0/ but builds/runs out of .../<run_index>/, which
-        # is empty except for the BSP.
+        # gen_corev-dv writes into GEN_START_INDEX, independent of RUN_INDEX
+        # (the build/run step's own dir) -- without this, a nonzero
+        # --run-index would build from an empty dir with no generated program.
         gen_cmd = (["make", "gen_corev-dv", f"TEST={test}",
                      f"GEN_START_INDEX={run_index}", f"SEED={gen_seed}"]
                     + tbcfg["make_args"])
@@ -489,6 +475,8 @@ def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None,
         cmd.append(f"SEED={run_seed}")
     if cov:
         cmd.append("COV=1")
+    if spike_tandem:
+        cmd.append("SPIKE_TANDEM=1")
     cmd += tbcfg["make_args"]
     if extra_make_args:
         cmd += extra_make_args
@@ -509,8 +497,7 @@ def run_test(tb, test, run_index, cfg, timeout, quiet, extra_make_args=None,
                 for line in lines:
                     print(prefix + line)
 
-    # The console output is authoritative for the run we just launched; fall
-    # back to the on-disk log if the banner did not reach stdout.
+    # Prefer console output; fall back to the on-disk log if no banner reached stdout.
     console = stdout + stderr
     run_seed_used = extract_seed(console)
     outcome = classify(console, tbcfg)
@@ -546,6 +533,84 @@ def parse_only(tb, test, run_index, cfg):
             gen_seed_used = extract_seed(gpath.read_text(errors="replace"))
 
     return classify(text, TESTBENCHES[tb]), "", gen_seed_used, run_seed_used
+
+
+_CERTIFY_SUMMARY_RE = re.compile(r"TOTAL=(\d+)\s+PASS=(\d+)\s+FAIL=(\d+)")
+
+
+def certify_summary_path(run_index):
+    """Location of certification_summary.txt (certify hardwires
+    TEST=certification, so this path isn't parameterized by tb/test/cfg)."""
+    return (TESTBENCHES["core"]["sim_dir"] / "simulation_results"
+            / "certification" / str(run_index) / "test_program"
+            / "certification_summary.txt")
+
+
+def classify_certify_summary(summary_path):
+    """Parse certify's aggregate 'TOTAL=n PASS=n FAIL=n' line into (outcome,
+    detail) -- there's no single pass/fail banner for the whole sweep."""
+    if not summary_path.is_file():
+        return "ERROR", f"no summary at {summary_path}"
+    text = summary_path.read_text(errors="replace")
+    m = _CERTIFY_SUMMARY_RE.search(text)
+    if not m:
+        return "ERROR", f"could not parse {summary_path}"
+    total, npass, nfail = (int(g) for g in m.groups())
+    if total > 0 and npass == total and nfail == 0:
+        return "PASS", f"{npass}/{total} compliance ELFs passed"
+    return "FAIL", (f"{npass}/{total} compliance ELFs passed, {nfail} "
+                     f"failed -- see {summary_path}")
+
+
+def run_certify(run_index, timeout, quiet, spike_tandem=False, filter_=None):
+    """Run `make certify` (the ACT4 compliance-ELF sweep); return (outcome,
+    detail). Unlike run_test(), one `make` invocation runs every ELF and
+    self-reports to certification_summary.txt (see classify_certify_summary()).
+
+    spike_tandem: SPIKE_TANDEM=1 -- see the certify target's own comment in
+    sim/core/Makefile for why +elf_file ordering matters there.
+    filter_: passed through as FILTER=... to narrow the ELF scan.
+    """
+    tbcfg = TESTBENCHES["core"]
+    env = make_env(tbcfg)
+    cmd = ["make", "certify", f"RUN_INDEX={run_index}"]
+    if spike_tandem:
+        cmd.append("SPIKE_TANDEM=1")
+    if filter_:
+        cmd.append(f"FILTER={filter_}")
+    cmd += tbcfg["make_args"]
+
+    try:
+        returncode, stdout, stderr = _run(cmd, tbcfg["sim_dir"], env, timeout, capture=True)
+    except subprocess.TimeoutExpired:
+        return "ERROR", f"timed out after {timeout}s"
+    except OSError as exc:
+        return "ERROR", f"could not launch make: {exc}"
+
+    if not quiet:
+        # Echo certify's own PASS/FAIL/TOTAL= lines, not the make/verilator noise.
+        lines = [line for line in stdout.splitlines()
+                 if line.startswith(("PASS", "FAIL", "TOTAL="))]
+        if lines:
+            with _print_lock:
+                for line in lines:
+                    print("    " + line)
+        elif returncode != 0:
+            # certify bailed before the loop (e.g. no ELFs found) -- that
+            # message wouldn't match the filter above, so echo raw output.
+            console = (stdout + stderr).rstrip()
+            if console:
+                with _print_lock:
+                    print(f"    [certify make output]\n{console}")
+
+    summary_path = certify_summary_path(run_index)
+    if not summary_path.is_file() and returncode != 0:
+        return "ERROR", f"make certify exited {returncode} (no summary written)"
+    if returncode != 0 and "No .elf files found" in stdout:
+        return "ERROR", (f"make certify exited {returncode}: no compliance "
+                          "ELFs found -- run `make gen` or `make gen-certify` "
+                          "in sim/core first")
+    return classify_certify_summary(summary_path)
 
 
 def main():
@@ -596,6 +661,28 @@ def main():
                          "collects nothing -- see docs/COVERAGE-MAKE-TARGETS.md "
                          "for the report targets (cov, cov_txt, cov_holes, "
                          "cov_holes_details) that consume the resulting .ucdb.")
+    ap.add_argument("--spike-tandem", action="store_true",
+                    help="run in tandem with the Spike ISS, comparing every "
+                         "retired instruction (core only; equivalent to "
+                         "`make test ... SPIKE_TANDEM=1` per test) -- see "
+                         "docs/spike-tandem.md. Combine with --certify to "
+                         "run the ACT4 compliance-ELF sweep in tandem too.")
+    ap.add_argument("--certify", action="store_true",
+                    help="run the ACT4 compliance-ELF sweep (core only; "
+                         "equivalent to `make certify`) instead of the named "
+                         "test set -- every prebuilt compliance ELF runs in "
+                         "its own verilator_executable invocation and the "
+                         "result is read back from certification_summary.txt. "
+                         "Combine with --spike-tandem to check every ELF "
+                         "against Spike in tandem (`make certify "
+                         "SPIKE_TANDEM=1`); cannot be combined with test "
+                         "names, --corev-dv-only, --include-parked, or "
+                         "--include-corev-dv.")
+    ap.add_argument("--filter", default=None,
+                    help="narrow --certify to one extension subdirectory "
+                         "(e.g. 'rv32i/Zicsr'), passed through as FILTER=... "
+                         "to `make certify` -- see sim/core/Makefile. No "
+                         "effect without --certify.")
     ap.add_argument("--quiet", action="store_true",
                     help="suppress per-test simulation banner output")
     ap.add_argument("--jobs", "-j", type=int, default=1,
@@ -610,6 +697,23 @@ def main():
     if args.cov and args.tb != "uvmt":
         ap.error("--cov requires --tb uvmt (Questa coverage; the core "
                   "Verilator testbench has no COV support)")
+
+    if args.spike_tandem and args.tb != "core":
+        ap.error("--spike-tandem requires --tb core (SPIKE_TANDEM is a "
+                  "sim/core Makefile setting; the uvmt testbench has its "
+                  "own separate Spike/RVVI integration)")
+
+    if args.certify:
+        if args.tb != "core":
+            ap.error("--certify requires --tb core (make certify is a "
+                      "sim/core-only target)")
+        if args.tests or args.corev_dv_only or args.include_parked or args.include_corev_dv:
+            ap.error("--certify cannot be combined with test names, "
+                      "--corev-dv-only, --include-parked, or "
+                      "--include-corev-dv (certify runs its own fixed ELF "
+                      "sweep, not the named test set)")
+    elif args.filter:
+        ap.error("--filter has no effect without --certify")
 
     if args.corev_dv_only:
         if args.tests or args.include_parked or args.include_corev_dv:
@@ -631,6 +735,26 @@ def main():
     if not sim_dir.is_dir():
         sys.exit(f"error: sim directory for --tb {args.tb} not found at {sim_dir}")
 
+    if args.spike_tandem and not args.parse_only:
+        setup_spike_lib(args.tb, args.timeout)
+
+    if args.certify:
+        # Own fixed ELF sweep -- short-circuit the rest of main().
+        action = "Parsing" if args.parse_only else "Running"
+        print(f"[{action}/core] certify"
+              + (" (spike-tandem)" if args.spike_tandem else "")
+              + (f" FILTER={args.filter}" if args.filter else "") + " ...")
+        if args.parse_only:
+            outcome, detail = classify_certify_summary(
+                certify_summary_path(args.run_index))
+        else:
+            outcome, detail = run_certify(
+                args.run_index, args.timeout, args.quiet,
+                spike_tandem=args.spike_tandem, filter_=args.filter)
+        print()
+        print(f"certify: {outcome} {detail}".rstrip())
+        sys.exit(0 if outcome == "PASS" else 1)
+
     needs_corev_dv = any(test in COREV_DV_TESTS for test in selected)
     if needs_corev_dv and not args.parse_only:
         if args.tb != "uvmt":
@@ -640,10 +764,8 @@ def main():
     extra_make_args = []
     if args.jobs > 1 and not args.parse_only:
         if args.tb == "uvmt":
-            # One-time serialized compile so the parallel batch below can pass
-            # COMP=NO and safely skip recompilation instead of racing on the
-            # shared vsim work library -- see the "Concurrency" section of
-            # --help for the full explanation.
+            # One-time compile so the batch below can pass COMP=NO safely --
+            # see the module docstring's "Concurrency" section.
             setup_comp(args.tb, args.timeout, cov=args.cov)
             extra_make_args = ["COMP=NO"]
         else:
@@ -666,7 +788,7 @@ def main():
                 extra_make_args=extra_make_args,
                 label=test if args.jobs > 1 else None,
                 gen_seed=args.gen_seed, run_seed=args.run_seed,
-                cov=args.cov)
+                cov=args.cov, spike_tandem=args.spike_tandem)
         if args.jobs > 1:
             done = "Parsed" if args.parse_only else "Done"
             with _print_lock:
@@ -686,9 +808,7 @@ def main():
         # Report in the original --selected order regardless of completion order.
         results = [outcomes[test] for test in selected]
 
-    # Summary. GEN_SEED/RUN_SEED are "-" for non-corev-dv tests (no generation
-    # step, no explicit SEED given) -- see run_test()'s docstring for why the
-    # two are tracked independently rather than as a single seed.
+    # GEN_SEED/RUN_SEED are "-" for non-corev-dv tests (see run_test()).
     def _fmt_seed(s):
         return s if s is not None else "-"
 

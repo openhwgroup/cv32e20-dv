@@ -336,6 +336,12 @@ gen: $(ACT4_PKG)
 	@echo "* Tests generated in: $(certification_PROGRAM_PATH)"
 
 .PHONY: certify
+# SPIKE_TANDEM=1: unlike `test`, certify runs many ELFs per invocation, so
+# VERI_RUN_FLAGS's compile-time +elf_file (baked from TEST=certification,
+# not a real file) is wrong for every iteration. The loop below passes its
+# own "+elf_file=$$ELF" BEFORE $(VERI_RUN_FLAGS) -- Verilator's
+# $value$plusargs matches the FIRST +elf_file= on the command line
+# (verilated.cpp's argPlusMatch), so the ordering here is load-bearing.
 certify: TEST = certification
 certify: verilate
 	@echo "$(BANNER)"
@@ -367,6 +373,7 @@ certify: verilate
 	  fi; \
 	  set +e; \
 	  "$(SIM_TEST_RESULTS)/verilator_executable" \
+	    "+elf_file=$$ELF" \
 	    $(VERI_RUN_FLAGS) \
 	    $(VERI_WAVE_CMD) \
 	    "+test_program=$$HEX" \

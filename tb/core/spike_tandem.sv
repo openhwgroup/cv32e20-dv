@@ -16,7 +16,6 @@
 //     SPIKE_TANDEM=1 in sim/core/Makefile).
 //
 // Known phase-1 limitations (documented in docs/spike-tandem.md):
-//   - Debug-mode entry is not modeled (debug_injection=0).
 //   - Loads from testbench virtual peripherals (e.g. the mm_ram timer) return
 //     testbench-specific values that Spike cannot predict.
 //   - Reads of free-running counter CSRs (cycle/mcycle/mip) are handled by
@@ -60,7 +59,21 @@ module spike_tandem
     // mcause cause code that the top-level 1-bit rvfi_intr port truncates
     // away. {cause[5:0], 3'b101} = async interrupt entry, {cause[5:0],
     // 3'b011} = sync exception entry, 9'b0 otherwise.
-    input logic [ 8:0] rvfi_intr_cause
+    input logic [ 8:0] rvfi_intr_cause,
+
+    // Raw external IRQ lines (cv32e20_tb_wrapper.sv's irq_from_mm_ram) --
+    // used to independently verify mip instead of trusting the RTL's own
+    // readback. See tandem_step().
+    input logic [31:0] rvfi_ext_irq,
+
+    // Whitebox probe of cve2_core.sv's internal rvfi_stage_dbg -- a one-shot
+    // debug-entry cause tag used to inject debug-mode entry into Spike. See
+    // tandem_step() and docs/spike-tandem.md.
+    input logic [ 3:0] rvfi_dbg_cause,
+
+    // Whitebox probe of the RTL's own debug_mode, for an independent
+    // cross-check in compare_retirement() at every retirement (not just entry).
+    input logic        rvfi_dbg_mode
    );
 
     // ID CSR values of the CV32E20.  Must match cve2_pkg.sv:
@@ -104,13 +117,12 @@ module spike_tandem
 
         void'(spike_set_default_params("cve2"));
 
-        // ISA / privilege configuration (must match the RTL build:
-        // RV32IMC+Zicsr+Zifencei, M+U modes -- see MISA_VALUE in
-        // cve2_cs_registers.sv).
+        // ISA / privilege configuration (must match the RTL build): M-mode
+        // only -- UmodeEnabled=0 in cve2_cs_registers.sv means no U bit.
         void'(spike_set_param_str("/top/", "isa", "rv32imc_zicsr_zifencei"));
         void'(spike_set_param_str(base,    "isa", "rv32imc_zicsr_zifencei"));
-        void'(spike_set_param_str("/top/", "priv", "MU"));
-        void'(spike_set_param_str(base,    "priv", "MU"));
+        void'(spike_set_param_str("/top/", "priv", "M"));
+        void'(spike_set_param_str(base,    "priv", "M"));
 
         // Memory map (see localparams above).  The CVE2 has no boot ROM:
         // execution starts directly at {boot_addr[31:2], 2'b00}.
@@ -147,6 +159,10 @@ module spike_tandem
         // mstatus reset value: MPP=M (0x1800), everything else 0.
         void'(spike_set_param_uint64_t(base, "mstatus_override_mask",  64'hFFFF_FFFF));
         void'(spike_set_param_uint64_t(base, "mstatus_override_value", 64'h0000_1800));
+        // UmodeEnabled=0 hardwires MPRV/TW to 0 and clamps MPP to M, so
+        // MIE/MPIE are the only bits software can actually change here --
+        // mask Spike's writes down to match.
+        void'(spike_set_param_uint64_t(base, "mstatus_write_mask",   64'h0000_0088));
 
         // Single trigger, tdata1 reset value per CVE2 (type=2 mcontrol,
         // dmode=1, maskmax=0x4, action/match bits per cve2_cs_registers).
@@ -172,15 +188,16 @@ module spike_tandem
         // first instruction, leaving that instruction's rvfi info stale by
         // one DPI call relative to the RTL's single retirement.
         void'(spike_set_param_bool(base, "unified_traps",        1'b1));
-        // Phase 1: no debug-request injection yet.
-        void'(spike_set_param_bool(base, "debug_injection",      1'b0));
+        // Debug-mode entry injection: rvfi_dbg_cause (see tandem_step())
+        // feeds reference->dbg, which Proc.cc already knows how to consume.
+        void'(spike_set_param_bool(base, "debug_injection",      1'b1));
 
         // Run until the DUT stops retiring; never let Spike terminate first.
         void'(spike_set_param_bool("/top/", "max_steps_enabled", 1'b0));
 
         $display("[%s] starting Spike in tandem mode", id);
         $display("[%s]   elf_file  = %s",     id, elf_file);
-        $display("[%s]   isa       = rv32imc_zicsr_zifencei (priv MU)", id);
+        $display("[%s]   isa       = rv32imc_zicsr_zifencei (priv M)", id);
         $display("[%s]   boot_addr = 0x%08h", id, {BOOT_ADDR[31:2], 2'b00});
         spike_create(elf_file);
     endfunction : spike_tandem_init
@@ -219,6 +236,13 @@ module spike_tandem
 
         if (s_ref.mode[1:0] !== rvfi_mode) begin
             $display("[%s] MISMATCH mode:     rtl=%0d spike=%0d", id, rvfi_mode, s_ref.mode[1:0]);
+            errors++;
+        end
+
+        // Cross-check debug-mode occupancy at every retirement (not just
+        // entry) -- s_ref.dbg_mode is Proc.cc's own output, not forwarded.
+        if (s_ref.dbg_mode[0] !== rvfi_dbg_mode) begin
+            $display("[%s] MISMATCH dbg_mode: rtl=%0d spike=%0d", id, rvfi_dbg_mode, s_ref.dbg_mode[0]);
             errors++;
         end
 
@@ -275,6 +299,22 @@ module spike_tandem
             s_core.intr             = 64'h5;
             s_core.csr_rdata[12'h342] = {32'b0, 1'b1, 25'b0, rvfi_intr_cause[8:3]};
         end
+
+        // Independent mip verification: mip is a pure combinational
+        // reflection of the external IRQ lines (MSIP=bit3, MTIP=bit7,
+        // MEIP=bit11, fast=bits[31:16], CVE2's CSR_M*IX_BIT layout).
+        // Trusting the RTL's own readback would make this tautological, so
+        // smuggle the raw pre-DUT IRQ lines into csr_rdata[CSR_MIP] the same
+        // way rvfi_intr_cause smuggles mcause above; Proc.cc uses this
+        // instead of forwarding mip from the reference.
+        s_core.csr_rdata[12'h344] = {32'b0, (rvfi_ext_irq & 32'hFFFF_0888)};
+
+        // Debug-mode entry injection: Proc.cc::step() reads reference->dbg
+        // and, when nonzero, calls enter_debug_mode() with this cause.
+        // rvfi_dbg_cause is a one-shot tag, zero except on the entry
+        // retirement -- only the async haltreq cause needs forwarding;
+        // ebreak/step entries are already self-contained in Spike.
+        s_core.dbg = {60'b0, rvfi_dbg_cause};
 
         // Orientation probe: Proc.cc detects the packed-struct word reversal
         // by checking csr_addr[0x300] (see INDEX_CSR).
