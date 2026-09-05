@@ -34,6 +34,20 @@ make test TEST=illegal
 make test TEST=riscv_ebreak_test_0
 ```
 
+Running with the Spike reference model in lock-step ("tandem")
+--------------------------------------------------------------
+Any custom test can also be run with the Spike ISS verifying every retired
+instruction against the RTL via the core's RVFI interface:
+```
+make test TEST=hello-world SPIKE_TANDEM=1
+```
+The first tandem run builds the tandem-patched Spike from the core-v-verif
+vendor tree into `../../tools/spike` (see the `spike_lib` target).  On
+success the log ends with `[spike_tandem] <N> instructions verified in
+tandem with Spike`; any divergence stops the simulation with a
+`TANDEM MISMATCH` report.  Details and current limitations:
+`../../docs/spike-tandem.md`.
+
 Running RISC-V Architectural Certification Tests (ACT4)
 -------------------------------------------------------
 CV32E20-DV supports the RISC-V Architectural Certification Tests (ACT4). The ACT4 repository is

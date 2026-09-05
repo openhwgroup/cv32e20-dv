@@ -63,6 +63,66 @@ module cv32e20_tb_wrapper
     // signals to debug unit
     logic                         debug_req;
 
+`ifdef SPIKE_TANDEM
+    // RVFI retirement interface from cve2_top (compile with +define+RVFI)
+    logic        rvfi_valid;
+    logic [63:0] rvfi_order;
+    logic [31:0] rvfi_insn;
+    logic        rvfi_trap;
+    logic        rvfi_halt;
+    logic        rvfi_intr;
+    logic [ 1:0] rvfi_mode;
+    logic [ 1:0] rvfi_ixl;
+    logic [ 4:0] rvfi_rs1_addr;
+    logic [ 4:0] rvfi_rs2_addr;
+    logic [ 4:0] rvfi_rs3_addr;
+    logic [31:0] rvfi_rs1_rdata;
+    logic [31:0] rvfi_rs2_rdata;
+    logic [31:0] rvfi_rs3_rdata;
+    logic [ 4:0] rvfi_rd_addr;
+    logic [31:0] rvfi_rd_wdata;
+    logic [31:0] rvfi_pc_rdata;
+    logic [31:0] rvfi_pc_wdata;
+    logic [31:0] rvfi_mem_addr;
+    logic [ 3:0] rvfi_mem_rmask;
+    logic [ 3:0] rvfi_mem_wmask;
+    logic [31:0] rvfi_mem_rdata;
+    logic [31:0] rvfi_mem_wdata;
+    logic [31:0] rvfi_ext_mip;
+    logic        rvfi_ext_nmi;
+    logic        rvfi_ext_debug_req;
+    logic [63:0] rvfi_ext_mcycle;
+
+    // Whitebox probe: cve2_core.sv computes {mcause_q[5:0], 3'b101} for an
+    // asynchronous-interrupt entry retirement (3'b011 for a synchronous
+    // exception entry, 3'b000 otherwise) in its internal rvfi_stage_intr
+    // pipeline, but only the LSB of that value reaches the top-level 1-bit
+    // rvfi_intr port. RVFI_STAGES=1 for this core, so rvfi_stage_intr[0] is
+    // exactly time-aligned with rvfi_valid/rvfi_intr. spike_tandem needs the
+    // full value to inject interrupts into Spike (see docs/spike-tandem.md).
+    wire [8:0] rvfi_intr_cause = cv32e20_top_inst.u_cve2_core.rvfi_stage_intr[0];
+
+    // Whitebox probe: cve2_core.sv computes a one-shot debug-entry cause tag
+    // in its internal rvfi_dbg (captured_debug_valid ? captured_debug_cause :
+    // 0, cleared as soon as the next instruction enters ID), pipelined into
+    // rvfi_stage_dbg[]. RVFI_STAGES=1 here, so index [0] is exactly
+    // time-aligned with this retirement, same reasoning as rvfi_intr_cause
+    // above. Cause encoding (cve2_pkg.sv DBG_CAUSE_EBREAK/TRIGGER/HALTREQ/
+    // STEP = 1/2/3/4) matches Spike's own DCSR_CAUSE_* 1:1, so it can be
+    // forwarded verbatim. The top-level rvfi_ext_debug_req port is
+    // deliberately NOT used for this: it is a raw, level-held echo of the
+    // debug_req_i pin with no cause information, not a one-shot entry-exact
+    // tag, and using it would risk Spike entering debug mode a retirement or
+    // more before the RTL does. See docs/spike-tandem.md.
+    wire [3:0] rvfi_dbg_cause = cv32e20_top_inst.u_cve2_core.rvfi_stage_dbg[0];
+
+    // Whitebox probe of the RTL's own debug_mode state, for an independent
+    // cross-check that Spike and the RTL agree on debug-mode occupancy at
+    // every retirement (not just entry) - see spike_tandem.sv's
+    // compare_retirement().
+    wire rvfi_dbg_mode = cv32e20_top_inst.u_cve2_core.debug_mode;
+`endif
+
     // irq signals (driven from mm_ram virtual interrupt peripheral)
     logic [31:0]                  irq_from_mm_ram;
     logic [0:4]                   irq_id_in;
@@ -114,12 +174,42 @@ module cv32e20_tb_wrapper
          .irq_timer_i            ( irq_from_mm_ram[7]    ),
          .irq_external_i         ( irq_from_mm_ram[11]   ),
          .irq_fast_i             ( irq_from_mm_ram[31:16]),
-         .irq_nm_i               ( 1'b0                  ), // TODO: non-maskeable interrupt
+         .irq_nm_i               (  1'b0                 ),       // non-maskeable interrupt
 
          .debug_req_i            ( debug_req             ),
          .dm_halt_addr_i         ( DM_HALTADDRESS        ),
          .dm_exception_addr_i    ( DM_EXCEPTIONADDRESS   ),
          .crash_dump_o           (                       ),
+
+`ifdef SPIKE_TANDEM
+         .rvfi_valid             ( rvfi_valid            ),
+         .rvfi_order             ( rvfi_order            ),
+         .rvfi_insn              ( rvfi_insn             ),
+         .rvfi_trap              ( rvfi_trap             ),
+         .rvfi_halt              ( rvfi_halt             ),
+         .rvfi_intr              ( rvfi_intr             ),
+         .rvfi_mode              ( rvfi_mode             ),
+         .rvfi_ixl               ( rvfi_ixl              ),
+         .rvfi_rs1_addr          ( rvfi_rs1_addr         ),
+         .rvfi_rs2_addr          ( rvfi_rs2_addr         ),
+         .rvfi_rs3_addr          ( rvfi_rs3_addr         ),
+         .rvfi_rs1_rdata         ( rvfi_rs1_rdata        ),
+         .rvfi_rs2_rdata         ( rvfi_rs2_rdata        ),
+         .rvfi_rs3_rdata         ( rvfi_rs3_rdata        ),
+         .rvfi_rd_addr           ( rvfi_rd_addr          ),
+         .rvfi_rd_wdata          ( rvfi_rd_wdata         ),
+         .rvfi_pc_rdata          ( rvfi_pc_rdata         ),
+         .rvfi_pc_wdata          ( rvfi_pc_wdata         ),
+         .rvfi_mem_addr          ( rvfi_mem_addr         ),
+         .rvfi_mem_rmask         ( rvfi_mem_rmask        ),
+         .rvfi_mem_wmask         ( rvfi_mem_wmask        ),
+         .rvfi_mem_rdata         ( rvfi_mem_rdata        ),
+         .rvfi_mem_wdata         ( rvfi_mem_wdata        ),
+         .rvfi_ext_mip           ( rvfi_ext_mip          ),
+         .rvfi_ext_nmi           ( rvfi_ext_nmi          ),
+         .rvfi_ext_debug_req     ( rvfi_ext_debug_req    ),
+         .rvfi_ext_mcycle        ( rvfi_ext_mcycle       ),
+`endif
 
          // CPU Control Signals
          .fetch_enable_i         ( fetch_enable_i        ),
@@ -169,5 +259,42 @@ module cv32e20_tb_wrapper
          .exit_valid_o   ( exit_valid_o                              ),
          .exit_value_o   ( exit_value_o                              )
         );
+
+`ifdef SPIKE_TANDEM
+    // Lock-step comparison of every retired instruction against Spike.
+    spike_tandem
+        #(.BOOT_ADDR (BOOT_ADDR),
+          .HART_ID   (HART_ID)
+         )
+    spike_tandem_inst
+        (.clk_i          ( clk_i          ),
+         .rst_ni         ( rst_ni         ),
+         .rvfi_valid     ( rvfi_valid     ),
+         .rvfi_order     ( rvfi_order     ),
+         .rvfi_insn      ( rvfi_insn      ),
+         .rvfi_trap      ( rvfi_trap      ),
+         .rvfi_halt      ( rvfi_halt      ),
+         .rvfi_intr      ( rvfi_intr      ),
+         .rvfi_mode      ( rvfi_mode      ),
+         .rvfi_ixl       ( rvfi_ixl       ),
+         .rvfi_rs1_addr  ( rvfi_rs1_addr  ),
+         .rvfi_rs2_addr  ( rvfi_rs2_addr  ),
+         .rvfi_rs1_rdata ( rvfi_rs1_rdata ),
+         .rvfi_rs2_rdata ( rvfi_rs2_rdata ),
+         .rvfi_rd_addr   ( rvfi_rd_addr   ),
+         .rvfi_rd_wdata  ( rvfi_rd_wdata  ),
+         .rvfi_pc_rdata  ( rvfi_pc_rdata  ),
+         .rvfi_pc_wdata  ( rvfi_pc_wdata  ),
+         .rvfi_mem_addr  ( rvfi_mem_addr  ),
+         .rvfi_mem_rmask ( rvfi_mem_rmask ),
+         .rvfi_mem_wmask ( rvfi_mem_wmask ),
+         .rvfi_mem_rdata ( rvfi_mem_rdata ),
+         .rvfi_mem_wdata ( rvfi_mem_wdata ),
+         .rvfi_intr_cause( rvfi_intr_cause),
+         .rvfi_ext_irq   ( irq_from_mm_ram),
+         .rvfi_dbg_cause ( rvfi_dbg_cause ),
+         .rvfi_dbg_mode  ( rvfi_dbg_mode  )
+        );
+`endif
 
 endmodule : cv32e20_tb_wrapper
